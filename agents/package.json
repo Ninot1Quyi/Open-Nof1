@@ -1,0 +1,27 @@
+{
+  "name": "ai-trading-agents",
+  "version": "1.0.0",
+  "description": "AI Trading Agents",
+  "type": "module",
+  "main": "build/agents/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/agents/main.js",
+    "start:single": "node build/agents/agent.js",
+    "dev": "tsc && node build/agents/main.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.2",
+    "@types/pg": "^8.15.6",
+    "@types/uuid": "^10.0.0",
+    "ccxt": "^4.5.13",
+    "dotenv": "^16.0.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.0.0"
+  }
+}

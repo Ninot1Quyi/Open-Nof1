@@ -1,0 +1,38 @@
+{
+  "name": "ai-trading-backend",
+  "version": "1.0.0",
+  "description": "Backend service for AI Trading platform",
+  "type": "module",
+  "main": "build/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "dev": "tsc && node build/index.js",
+    "watch": "tsc --watch",
+    "clean": "rm -rf build",
+    "init-db": "psql -U postgres -d ai_trading -f database/schema.sql"
+  },
+  "keywords": [
+    "trading",
+    "ai",
+    "backend",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "ccxt": "^4.5.13",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2"
+  }
+}

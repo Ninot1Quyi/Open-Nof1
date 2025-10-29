@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "node",
+    "outDir": "./build",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "agent.ts",
+    "main.ts",
+    "prompts/**/*",
+    "utils/**/*"
+  ],
+  "exclude": [
+    "test-*.ts",
+    "node_modules",
+    "build"
+  ]
+}
