@@ -51,14 +51,33 @@ else
     echo -e "${GREEN}✓ 创建成功${NC}"
 fi
 
-# 4. 初始化数据库表
-echo -n "4. 初始化数据库表... "
+# 4. 检查并创建数据库用户
+echo -n "4. 检查数据库用户 OpenNof1... "
+if psql postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='OpenNof1'" | grep -q 1; then
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${YELLOW}! 用户不存在，正在创建...${NC}"
+    psql postgres -c 'CREATE USER "OpenNof1" WITH PASSWORD '"'"''"'"' CREATEDB;' > /dev/null 2>&1
+    psql postgres -c 'GRANT ALL PRIVILEGES ON DATABASE ai_trading TO "OpenNof1";' > /dev/null 2>&1
+    psql postgres -c 'GRANT ALL PRIVILEGES ON DATABASE nof1 TO "OpenNof1";' > /dev/null 2>&1
+    # 授予 schema 权限
+    psql ai_trading -c 'GRANT ALL ON SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql ai_trading -c 'GRANT ALL ON ALL TABLES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql ai_trading -c 'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql nof1 -c 'GRANT ALL ON SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql nof1 -c 'GRANT ALL ON ALL TABLES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql nof1 -c 'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    echo -e "${GREEN}✓ 创建成功${NC}"
+fi
+
+# 5. 初始化数据库表
+echo -n "5. 初始化数据库表... "
 cd "$PROJECT_ROOT/backend"
 psql -d ai_trading -f database/schema.sql > /dev/null 2>&1
 echo -e "${GREEN}✓${NC}"
 
-# 5. 检查后端配置
-echo -n "5. 检查后端配置... "
+# 6. 检查后端配置
+echo -n "6. 检查后端配置... "
 if [ ! -f .env ]; then
     echo -e "${YELLOW}! .env 不存在，从示例复制${NC}"
     cp .env.example .env
@@ -69,8 +88,8 @@ else
     echo -e "${GREEN}✓${NC}"
 fi
 
-# 6. 检查 MCP 依赖
-echo -n "6. 检查 MCP 依赖... "
+# 7. 检查 MCP 依赖
+echo -n "7. 检查 MCP 依赖... "
 cd "$PROJECT_ROOT/mcp"
 if [ ! -d node_modules ]; then
     echo -e "${YELLOW}! 正在安装...${NC}"
@@ -80,8 +99,8 @@ else
     echo -e "${GREEN}✓${NC}"
 fi
 
-# 7. 检查后端依赖
-echo -n "7. 检查后端依赖... "
+# 8. 检查后端依赖
+echo -n "8. 检查后端依赖... "
 cd "$PROJECT_ROOT/backend"
 if [ ! -d node_modules ]; then
     echo -e "${YELLOW}! 正在安装...${NC}"
@@ -91,8 +110,8 @@ else
     echo -e "${GREEN}✓${NC}"
 fi
 
-# 8. 检查前端依赖
-echo -n "8. 检查前端依赖... "
+# 9. 检查前端依赖
+echo -n "9. 检查前端依赖... "
 cd "$PROJECT_ROOT/web"
 if [ ! -d node_modules ]; then
     echo -e "${YELLOW}! 正在安装...${NC}"
@@ -102,8 +121,8 @@ else
     echo -e "${GREEN}✓${NC}"
 fi
 
-# 9. 检查 Agents 依赖
-echo -n "9. 检查 Agents 依赖... "
+# 10. 检查 Agents 依赖
+echo -n "10. 检查 Agents 依赖... "
 cd "$PROJECT_ROOT/agents"
 if [ ! -d node_modules ]; then
     echo -e "${YELLOW}! 正在安装...${NC}"
@@ -113,8 +132,8 @@ else
     echo -e "${GREEN}✓${NC}"
 fi
 
-# 10. 检查 tsx（用于直接运行 TypeScript）
-echo -n "10. 检查 tsx... "
+# 11. 检查 tsx（用于直接运行 TypeScript）
+echo -n "11. 检查 tsx... "
 if ! command -v tsx &> /dev/null; then
     echo -e "${YELLOW}! 正在全局安装 tsx...${NC}"
     npm install -g tsx > /dev/null 2>&1
@@ -125,35 +144,7 @@ fi
 
 echo ""
 echo "========================================="
-echo -e "${GREEN}  ✓ 准备完成！${NC}"
-echo "========================================="
-echo ""
-
-# 询问是否启动服务
-echo "准备启动以下服务："
-echo "  1. MCP 服务器"
-echo "  2. 后端服务 (http://localhost:3001)"
-echo "  3. 前端服务 (http://localhost:3000)"
-echo "  4. Trading Agents"
-echo ""
-read -p "是否现在启动? (Y/n): " -n 1 -r
-echo
-
-if [[ $REPLY =~ ^[Nn]$ ]]; then
-    echo ""
-    echo "取消启动。你可以手动启动："
-    echo ""
-    echo "  MCP: cd mcp && tsx src/index.ts"
-    echo "  后端: cd backend && tsx src/index.ts"
-    echo "  前端: cd web && npm run dev"
-    echo "  Agents: cd agents && tsx main.ts"
-    echo ""
-    exit 0
-fi
-
-echo ""
-echo "========================================="
-echo -e "${BLUE}  🚀 启动服务${NC}"
+echo -e "${GREEN}  ✓ 准备完成！正在启动服务...${NC}"
 echo "========================================="
 echo ""
 
