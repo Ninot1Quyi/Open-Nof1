@@ -1,14 +1,12 @@
 # OpenNof1
 
-[English](#english) | [中文](#chinese)
+开源且自由的加密货币交易、测试、竞技平台
+
+[English](README.md) | 中文
 
 ---
 
-<a name="chinese"></a>
-
-## 中文文档
-
-### 项目简介
+## 项目简介
 
 OpenNof1 是一个开源的 AI 加密货币交易竞技平台，旨在复刻 [nof1.ai](https://nof1.ai/) 的核心功能，让任何人都可以使用自己的 AI 模型进行加密货币交易测试和竞赛。
 
@@ -44,13 +42,18 @@ OpenNof1 是一个开源的 AI 加密货币交易竞技平台，旨在复刻 [no
 复刻的 nof1.ai Live 交易界面：
 
 ![主界面](screenshots/p1.png)
-![交易详情](screenshots/p2.png)
-![账户概览](screenshots/p3.png)
+
+<p align="center">
+  <img src="screenshots/p2.png" width="49%" />
+  <img src="screenshots/p3.png" width="49%" />
+</p>
 
 连接交易所进行实时交易：
 
-![实时交易](screenshots/p5.png)
-![仓位管理](screenshots/p6.png)
+<p align="center">
+  <img src="screenshots/p5.png" width="49%" />
+  <img src="screenshots/p6.png" width="49%" />
+</p>
 
 
 

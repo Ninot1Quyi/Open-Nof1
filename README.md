@@ -1,5 +1,7 @@
 # OpenNof1
 
+Open-source and free cryptocurrency trading, testing, and competition platform
+
 [中文](README-zh.md) | English
 
 ---
@@ -42,13 +44,18 @@ Therefore, the MCP architecture is retained to allow for future feature expansio
 Replicated nof1.ai Live trading interface:
 
 ![Main Interface](screenshots/p1.png)
-![Trading Details](screenshots/p2.png)
-![Account Overview](screenshots/p3.png)
+
+<p align="center">
+  <img src="screenshots/p2.png" width="49%" />
+  <img src="screenshots/p3.png" width="49%" />
+</p>
 
 Live trading with exchange connection:
 
-![Live Trading](screenshots/p5.png)
-![Position Management](screenshots/p6.png)
+<p align="center">
+  <img src="screenshots/p5.png" width="49%" />
+  <img src="screenshots/p6.png" width="49%" />
+</p>
 
 ### Quick Start
 
