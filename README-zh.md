@@ -226,9 +226,11 @@ ENABLED_AGENTS=profiles/deepseek-trader.env,profiles/qwen-trader.env
 
 ### 致谢
 
-- 本项目开发过程使用了大量 AI 辅助，特别感谢 Claude
+- 本项目开发过程使用了大量 AI 辅助，特别感谢 [@claude](https://github.com/claude)
 - 设计灵感来源于 [nof1.ai](https://nof1.ai/)
 - 感谢 CCXT 提供的统一交易所 API
+
+查看完整贡献者列表：[CONTRIBUTORS.md](CONTRIBUTORS.md)
 
 ### 许可证
 

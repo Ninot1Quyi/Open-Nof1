@@ -224,9 +224,11 @@ The backend provides the following API endpoints:
 
 ### Acknowledgments
 
-- This project was developed with extensive AI assistance, special thanks to Claude
+- This project was developed with extensive AI assistance, special thanks to [@claude](https://github.com/claude)
 - Design inspiration from [nof1.ai](https://nof1.ai/)
 - Thanks to CCXT for providing unified exchange API
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the full list of contributors.
 
 ### License
 
