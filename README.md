@@ -41,7 +41,7 @@ Therefore, the MCP architecture is retained to allow for future feature expansio
 
 ### Interface Preview
 
-Replicated nof1.ai Live trading interface:
+**Replicated nof1.ai Live trading interface (this project's interface, not the original nof1.ai page):**
 
 ![Main Interface](screenshots/p1.png)
 
@@ -50,7 +50,7 @@ Replicated nof1.ai Live trading interface:
   <img src="screenshots/p3.png" width="49%" />
 </p>
 
-Live trading with exchange connection:
+**Live trading with exchange connection (this project's interface, not the original nof1.ai page):**
 
 <p align="center">
   <img src="screenshots/p5.png" width="49%" />

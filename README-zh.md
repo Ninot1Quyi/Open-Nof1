@@ -39,7 +39,7 @@ OpenNof1 是一个开源的 AI 加密货币交易竞技平台，旨在复刻 [no
 
 ### 界面展示
 
-复刻的 nof1.ai Live 交易界面：
+**复刻的 nof1.ai Live 交易界面（本项目界面，非 nof1.ai 原始页面）：**
 
 ![主界面](screenshots/p1.png)
 
@@ -48,7 +48,7 @@ OpenNof1 是一个开源的 AI 加密货币交易竞技平台，旨在复刻 [no
   <img src="screenshots/p3.png" width="49%" />
 </p>
 
-连接交易所进行实时交易：
+**连接交易所进行实时交易（本项目界面，非 nof1.ai 原始页面）：**
 
 <p align="center">
   <img src="screenshots/p5.png" width="49%" />
