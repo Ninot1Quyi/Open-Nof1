@@ -30,9 +30,6 @@ export class AccountStateTool {
       include_performance = true,
     } = params;
 
-    // 获取交易模式
-    const tradingMode = config.tradingMode || 'futures';
-    
     // Get balance
     const balance = await this.exchange.getBalance();
     
@@ -56,37 +53,12 @@ export class AccountStateTool {
       'usdtDetail.frozenBal': usdtDetail?.frozenBal
     });
 
-    // Step 1: 根据交易模式获取仓位数据
-    let exchangePositions: any[] = [];
+    // Step 1: 从交易所获取实时仓位数据
+    const exchangePositions = include_positions
+      ? await this.exchange.getPositions()
+      : [];
     
-    if (include_positions) {
-      if (tradingMode === 'spot') {
-        // 现货模式：从余额中获取持仓（持有的币种）
-        const tradableCoins = ['BTC', 'ETH', 'SOL', 'BNB'];
-        for (const coin of tradableCoins) {
-          const coinBalance = balance[coin];
-          const total = coinBalance?.total || 0;
-          if (total > 0) {
-            // 将余额转换为仓位格式
-            const ticker = await this.exchange.getExchange().fetchTicker(`${coin}/USDT`);
-            const currentPrice = ticker.last || ticker.close || 0;
-            exchangePositions.push({
-              symbol: `${coin}/USDT`,
-              side: 'long',  // 现货只有多头（持有）
-              contracts: total,
-              entryPrice: 0,  // 现货没有入场价格概念，从数据库获取
-              markPrice: currentPrice,
-              leverage: 1,
-            });
-          }
-        }
-        console.log(`[AccountState] Found ${exchangePositions.length} spot holdings from balance`);
-      } else {
-        // 合约模式：从 positions 获取
-        exchangePositions = await this.exchange.getPositions();
-        console.log(`[AccountState] Found ${exchangePositions.length} futures positions from exchange`);
-      }
-    }
+    // this.log(`Found ${exchangePositions.length} positions from exchange`);
 
     // Step 2: 同步交易所数据到数据库
     // 获取数据库中所有开仓记录
@@ -128,8 +100,8 @@ export class AccountStateTool {
           // 更新交易记录，包含实际退出价格和时间
           await this.db.updateTrade(trade.position_id, {
             exit_price: exitPrice,
-            exit_time: Math.floor(Date.now() / 1000),  // Unix 时间戳（秒）
-            net_pnl: realizedPnl,
+            exit_time: new Date(),
+            realized_pnl: realizedPnl,
             status: 'closed',
           });
           
@@ -245,39 +217,9 @@ export class AccountStateTool {
     }
 
     // 计算账户指标
-    // 根据交易模式计算账户价值
+    // Total PnL = 当前账户价值 - 初始资金
     const initialBalance = config.initialBalance || 10000;
-    
-    let accountValue: number;
-    if (tradingMode === 'spot') {
-      // 现货模式：账户价值 = 所有币种的市值 + USDT 余额
-      accountValue = usdtBalance.total || 0;
-      
-      // 获取所有可交易币种的余额和价格
-      const tradableCoins = ['BTC', 'ETH', 'SOL', 'BNB'];
-      for (const coin of tradableCoins) {
-        try {
-          const coinBalance = balance[coin];
-          const total = coinBalance?.total || 0;
-          if (total > 0) {
-            // 获取当前价格
-            const ticker = await this.exchange.getExchange().fetchTicker(`${coin}/USDT`);
-            const price = ticker.last || ticker.close || 0;
-            const coinValue = total * price;
-            accountValue += coinValue;
-            console.log(`[AccountState] ${coin}: ${total} × $${price} = $${coinValue.toFixed(2)}`);
-          }
-        } catch (error) {
-          console.error(`[AccountState] Error calculating ${coin} value:`, error);
-        }
-      }
-      
-      console.log(`[AccountState] Total account value (spot): $${accountValue.toFixed(2)}`);
-    } else {
-      // 合约模式：账户价值 = USDT 总权益 + 未实现盈亏
-      accountValue = (usdtBalance.total || 0) + totalUnrealizedPnl;
-    }
-    
+    const accountValue = (usdtBalance.total || 0) + totalUnrealizedPnl;
     const totalPnl = accountValue - initialBalance;
     
     // 从数据库获取历史统计（用于性能分析）

@@ -13,9 +13,16 @@ export default function Home() {
       try {
         const response = await fetch('/api/account-totals')
         const data = await response.json()
+        console.log('[index.tsx] API response:', { 
+          initialBalance: data.initialBalance, 
+          accountTotalsCount: data.accountTotals?.length 
+        })
         setAccountTotals(data.accountTotals || [])
         if (data.initialBalance) {
+          console.log('[index.tsx] Setting initialBalance:', data.initialBalance)
           setInitialBalance(data.initialBalance)
+        } else {
+          console.warn('[index.tsx] No initialBalance in response')
         }
       } catch (error) {
         console.error('Failed to fetch account totals:', error)

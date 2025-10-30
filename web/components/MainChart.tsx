@@ -44,6 +44,7 @@ export default function MainChart() {
   const [baseAccountTotals, setBaseAccountTotals] = useState<AccountData[]>([]) // 存储API获取的基础账户数据
   const [cryptoPrices, setCryptoPrices] = useState<{[key: string]: {price: number}} | null>(null) // 实时币价
   const [lastApiTimestamp, setLastApiTimestamp] = useState<number>(0) // 最后一次API获取的时间戳
+  const [initialBalance, setInitialBalance] = useState<number>(100) // 初始余额，默认100
   
   // 使用 ref 保存最新的状态，避免闭包问题
   const baseChartDataRef = useRef<any[]>([])
@@ -105,6 +106,13 @@ export default function MainChart() {
       fetch('/api/account-history')
         .then((res) => res.json())
         .then((data) => {
+          // 获取初始余额
+          if (data.initialBalance) {
+            console.log('[MainChart] Setting initialBalance from API:', data.initialBalance)
+            setInitialBalance(data.initialBalance)
+          } else {
+            console.warn('[MainChart] No initialBalance in API response:', data)
+          }
           const allAccounts = data.accountTotals || []
           
           // 获取每个模型的最新数据（保留完整的 account 对象，包含 positions）
@@ -232,12 +240,19 @@ export default function MainChart() {
           <div className="flex min-h-0 w-full flex-1 flex-col">
             <div className="relative flex min-h-0 flex-1 justify-center overflow-hidden transition-opacity duration-200 px-0.5 md:px-1 opacity-100 pt-8">
               {/* 图表区域 */}
-              <PerformanceChart
-                data={chartData}
-                selectedModel={selectedModel}
-                timeRange={timeRange}
-                displayMode={displayMode}
-              />
+              {(() => {
+                console.log('[MainChart] Rendering PerformanceChart with initialBalance:', initialBalance)
+                return (
+                  <PerformanceChart
+                    data={chartData}
+                    selectedModel={selectedModel}
+                    timeRange={timeRange}
+                    displayMode={displayMode}
+                    initialBalance={initialBalance}
+                    key={`chart-${initialBalance}`}
+                  />
+                )
+              })()}
             </div>
 
             {/* 按钮在图表外层 */}
@@ -327,12 +342,10 @@ export default function MainChart() {
               <div className="flex-1 w-full">
                 <div className="flex flex-wrap gap-1 md:gap-2 w-full justify-center">
                   {sortedAccounts.map((account) => {
-                    const initialValue = 10000
                     // 使用实时币价计算账户价值
                     const realtimeValue = calculateRealtimeAccountValue(account)
                     const percentChange =
-                      ((realtimeValue - initialValue) / initialValue) *
-                      100
+                      ((realtimeValue - initialBalance) / initialBalance) * 100 // 修改为使用 initialBalance
 
                     return (
                       <ModelCard
@@ -343,13 +356,11 @@ export default function MainChart() {
                         currentValue={realtimeValue}
                         percentChange={percentChange}
                         isSelected={selectedModel === account.model_id}
-                        onClick={() =>
-                          setSelectedModel(
-                            selectedModel === account.model_id
-                              ? null
-                              : account.model_id
-                          )
-                        }
+                        onClick={() => {
+                          const newSelection = selectedModel === account.model_id ? null : account.model_id
+                          console.log('[MainChart] ModelCard clicked:', account.model_id, 'new selection:', newSelection)
+                          setSelectedModel(newSelection)
+                        }}
                       />
                     )
                   })}

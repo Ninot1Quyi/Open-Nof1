@@ -105,6 +105,7 @@ export default function TopBar({ accountTotals, initialBalance }: TopBarProps) {
       if (!account || typeof account.currentValue !== 'number') {
         return 0
       }
+      console.log('[TopBar] Calculating return with initialBalance:', initialBalance, 'currentValue:', account.currentValue)
       return ((account.currentValue - initialBalance) / initialBalance) * 100
     }
 

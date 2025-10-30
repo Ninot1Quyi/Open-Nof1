@@ -51,6 +51,7 @@ interface PerformanceChartProps {
   selectedModel?: string | null
   timeRange?: 'ALL' | '72H'
   displayMode?: '$' | '%'
+  initialBalance?: number
 }
 
 interface ChartProps extends PerformanceChartProps {
@@ -80,6 +81,7 @@ function Chart({
   selectedModel = null,
   timeRange = 'ALL',
   displayMode = '$',
+  initialBalance,
 }: ChartProps) {
   const [hoveredModelId, setHoveredModelId] = useState<string | null>(null)
   const [pulseKey, setPulseKey] = useState(0)
@@ -405,20 +407,29 @@ function Chart({
             const isHovered = hoveredModelId === modelId
             const shouldDim = hoveredModelId !== null && hoveredModelId !== modelId
             
+            console.log('[PerformanceChart] Rendering model:', modelId, {
+              selectedModel,
+              isSelected: selectedModel === modelId,
+              dataLength: modelData.length,
+              displayMode,
+              initialBalance
+            })
+            
             return (
               <g key={modelId}>
                 {/* Area fill - only show when model is selected */}
                 {selectedModel === modelId && modelData.length > 0 && (
                   <>
                     {/* Initial balance threshold line (invisible, for reference) */}
-                    {displayMode === '$' && (() => {
-                      const initialBalance = 10000;
-                      const thresholdY = yScale(initialBalance);
+                    {displayMode === '$' && initialBalance && (() => {
+                      const initBalance = initialBalance;
+                      console.log('[PerformanceChart] Drawing shadow with initialBalance:', initBalance)
+                      const thresholdY = yScale(initBalance);
                       
                       // Create data with initial point
                       const minTimestamp = Math.min(...modelData.map(d => d.timestamp));
                       const dataWithInitial = [
-                        { timestamp: minTimestamp, value: initialBalance, modelId },
+                        { timestamp: minTimestamp, value: initBalance, modelId },
                         ...modelData
                       ];
                       
@@ -478,11 +489,11 @@ function Chart({
                 <LinePath
                   data={(() => {
                     // 如果选中且显示美元，添加初始点
-                    if (selectedModel === modelId && displayMode === '$' && modelData.length > 0) {
-                      const initialBalance = 10000;
+                    if (selectedModel === modelId && displayMode === '$' && initialBalance && modelData.length > 0) {
+                      const initBalance = initialBalance;
                       const minTimestamp = Math.min(...modelData.map(d => d.timestamp));
                       return [
-                        { timestamp: minTimestamp, value: initialBalance, modelId },
+                        { timestamp: minTimestamp, value: initBalance, modelId },
                         ...modelData
                       ];
                     }
@@ -666,6 +677,7 @@ export default function PerformanceChart({
   selectedModel = null,
   timeRange = 'ALL',
   displayMode = '$',
+  initialBalance,
 }: PerformanceChartProps) {
   return (
     <div className="relative flex-1 bg-white">
@@ -678,6 +690,7 @@ export default function PerformanceChart({
             selectedModel={selectedModel}
             timeRange={timeRange}
             displayMode={displayMode}
+            initialBalance={initialBalance}
           />
         )}
       </ParentSize>

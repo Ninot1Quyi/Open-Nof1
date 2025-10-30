@@ -24,7 +24,8 @@ router.get('/account-history', async (req: Request, res: Response) => {
 
     res.json({
       accountTotals,
-      count: accountTotals.length
+      count: accountTotals.length,
+      initialBalance: parseFloat(process.env.INITIAL_BALANCE || '10000')
     });
   } catch (error) {
     console.error('[API] Error in /api/account-history:', error);

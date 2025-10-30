@@ -63,16 +63,8 @@ export class TradeExecutionTool {
         // 卖出开仓：开空仓
         return await this.openPosition('open_short', coin, leverage, margin_amount, exit_plan, confidence);
       } else if (action === 'sell' || action === 'close_position') {
-        // 卖出/平仓：根据交易模式选择不同的处理方式
-        const tradingMode = config.tradingMode || 'futures';
-        
-        if (tradingMode === 'spot') {
-          // 现货模式：直接卖出余额中的币种
-          return await this.sellSpot(coin, params.quantity);
-        } else {
-          // 合约模式：平仓
-          return await this.closePosition(coin);
-        }
+        // 平仓
+        return await this.closePosition(coin);
       } else if (action === 'reduce_position') {
         // 减仓
         return await this.reducePosition(coin, params.quantity, exit_plan);
@@ -165,28 +157,6 @@ export class TradeExecutionTool {
     console.log(`  - Notional Value: $${totalNotionalValue}`);
     console.log(`  - Quantity: ${totalQuantity} ${coin}`);
     
-    // 现货模式：检查可用余额是否足够
-    const tradingMode = config.tradingMode || 'futures';
-    if (tradingMode === 'spot') {
-      const balance = await this.exchange.getBalance();
-      const usdtBalance = balance['USDT'];
-      const availableCash = usdtBalance?.free || usdtBalance?.total || 0;
-      
-      console.log(`[SPOT] Available cash: $${availableCash.toFixed(2)} (need: $${marginAmount.toFixed(2)})`);
-      
-      if (availableCash < marginAmount) {
-        const shortfall = marginAmount - availableCash;
-        console.error(`[SPOT] Insufficient funds! Short by $${shortfall.toFixed(2)}`);
-        return {
-          success: false,
-          message: `Insufficient funds: need $${marginAmount.toFixed(2)}, have $${availableCash.toFixed(2)}, short by $${shortfall.toFixed(2)}`,
-          error: 'InsufficientFunds',
-        };
-      }
-      
-      console.log(`[SPOT] ✓ Sufficient funds, proceeding with order`);
-    }
-    
     // 尝试执行订单，如果太大则自动拆分
     const order = await this.executeOrderWithSplit(
       side,
@@ -210,142 +180,43 @@ export class TradeExecutionTool {
     let slTpWarning: string | undefined;
 
     try {
-      const tradingMode = config.tradingMode || 'futures';
-      
-      // 根据交易模式选择不同的止盈止损方法
-      if (tradingMode === 'spot') {
-        // 现货交易：需要等待买入完成后再设置止盈止损
-        if (exitPlan?.stop_loss || exitPlan?.profit_target) {
-          console.log(`[SPOT] Waiting for order to complete before setting stop loss/take profit...`);
-          
-          try {
-            // 轮询检查订单状态，直到完全成交
-            const orderId = order.id;
-            const symbol = `${coin}-USDT`;
-            let orderStatus = 'live';
-            let actualFilled = 0;
-            let attempts = 0;
-            const maxAttempts = 10; // 最多检查 10 次
-            
-            while (orderStatus !== 'filled' && attempts < maxAttempts) {
-              attempts++;
-              await new Promise(resolve => setTimeout(resolve, 500)); // 每次等待 0.5 秒
-              
-              try {
-                // 查询订单状态
-                const orderInfo = await this.exchange.getExchange().fetchOrder(orderId, symbol);
-                orderStatus = orderInfo.status || 'live';
-                actualFilled = orderInfo.filled || 0;
-                
-                console.log(`[SPOT] Order check ${attempts}/${maxAttempts}: status=${orderStatus}, filled=${actualFilled}`);
-                
-                if (orderStatus === 'closed' || orderStatus === 'filled') {
-                  break;
-                }
-              } catch (checkError) {
-                console.error(`[SPOT] Error checking order status:`, checkError);
-                // 如果查询失败，继续尝试
-              }
-            }
-            
-            if (orderStatus === 'filled' || orderStatus === 'closed') {
-              console.log(`[SPOT] Order filled successfully: ${actualFilled} ${coin}`);
-              
-              if (actualFilled > 0) {
-                // 等待并验证余额更新（多次尝试）
-                console.log(`[SPOT] Waiting for balance to update...`);
-                
-                let currentBalance = 0;
-                let balanceCheckAttempts = 0;
-                const maxBalanceChecks = 5; // 最多检查 5 次
-                
-                while (balanceCheckAttempts < maxBalanceChecks) {
-                  balanceCheckAttempts++;
-                  await new Promise(resolve => setTimeout(resolve, 1000)); // 每次等待 1 秒
-                  
-                  const balance = await this.exchange.getBalance();
-                  const coinBalance = balance[coin];
-                  currentBalance = coinBalance?.free || coinBalance?.total || 0;
-                  
-                  console.log(`[SPOT] Balance check ${balanceCheckAttempts}/${maxBalanceChecks}: ${currentBalance} ${coin} (expected: ${actualFilled})`);
-                  
-                  // 如果余额已更新（允许 1% 的误差，因为手续费）
-                  if (currentBalance >= actualFilled * 0.99) {
-                    console.log(`[SPOT] Balance confirmed!`);
-                    break;
-                  }
-                }
-                
-                if (currentBalance >= actualFilled * 0.99) {
-                  console.log(`[SPOT] Setting stop loss/take profit...`);
-                  
-                  const result = await this.exchange.setSpotStopLossAndTakeProfit(
-                    coin,
-                    actualFilled,
-                    exitPlan?.stop_loss,
-                    exitPlan?.profit_target
-                  );
-                  
-                  console.log(`[SPOT] Stop loss/take profit set successfully`);
-                  if (result?.data?.[0]?.algoId) {
-                    stopLossOrderId = result.data[0].algoId;
-                    takeProfitOrderId = result.data[0].algoId;
-                  }
-                } else {
-                  console.warn(`[SPOT] Balance still not updated after ${maxBalanceChecks} checks (${currentBalance} < ${actualFilled}), skipping stop loss/take profit`);
-                  slTpWarning = `Balance not updated after ${maxBalanceChecks} checks, stop loss/take profit skipped`;
-                }
-              } else {
-                console.error(`[SPOT] Order filled but no quantity recorded`);
-                slTpWarning = `Order filled but no quantity recorded`;
-              }
-            } else {
-              console.error(`[SPOT] Order did not complete within timeout`);
-              slTpWarning = `Order did not complete within timeout`;
-            }
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            console.error(`[ERROR] Failed to set spot stop loss/take profit:`, error);
-            slTpWarning = `Stop loss/take profit failed: ${errorMsg}`;
-          }
+      // 如果有止损价格，设置止损单
+      if (exitPlan?.stop_loss) {
+        console.error(`[INFO] Setting stop loss at $${exitPlan.stop_loss}...`);
+        try {
+          const slOrder = await this.exchange.setStopLoss(
+            coin,
+            side,
+            totalQuantity,
+            exitPlan.stop_loss
+          );
+          stopLossOrderId = slOrder.id;
+          // console.error(`[INFO] Stop loss order set for ${coin} at $${exitPlan.stop_loss}`);
+        } catch (slError) {
+          const errorMsg = slError instanceof Error ? slError.message : String(slError);
+          console.error(`[ERROR] Failed to set stop loss:`, slError);
+          slTpWarning = `Stop loss failed: ${errorMsg}`;
         }
-      } else {
-        // 合约交易：使用原有的方法分别设置止盈止损
-        // 如果有止损价格，设置止损单
-        if (exitPlan?.stop_loss) {
-          console.error(`[INFO] Setting stop loss at $${exitPlan.stop_loss}...`);
-          try {
-            const slOrder = await this.exchange.setStopLoss(
-              coin,
-              side,
-              totalQuantity,
-              exitPlan.stop_loss
-            );
-            stopLossOrderId = slOrder.id;
-          } catch (slError) {
-            const errorMsg = slError instanceof Error ? slError.message : String(slError);
-            console.error(`[ERROR] Failed to set stop loss:`, slError);
-            slTpWarning = `Stop loss failed: ${errorMsg}`;
-          }
-        }
+      }
 
-        // 如果有止盈价格，设置止盈单
-        if (exitPlan?.profit_target) {
-          try {
-            const tpOrder = await this.exchange.setTakeProfit(
-              coin,
-              side,
-              totalQuantity,
-              exitPlan.profit_target
-            );
-            takeProfitOrderId = tpOrder.id;
-          } catch (tpError) {
-            const errorMsg = tpError instanceof Error ? tpError.message : String(tpError);
-            console.error(`[ERROR] Failed to set take profit:`, tpError);
-            slTpWarning = slTpWarning 
-              ? `${slTpWarning}; Take profit failed: ${errorMsg}`
-              : `Take profit failed: ${errorMsg}`;
-          }
+      // 如果有止盈价格，设置止盈单
+      if (exitPlan?.profit_target) {
+        // console.error(`[INFO] Setting take profit at $${exitPlan.profit_target}...`);
+        try {
+          const tpOrder = await this.exchange.setTakeProfit(
+            coin,
+            side,
+            totalQuantity,
+            exitPlan.profit_target
+          );
+          takeProfitOrderId = tpOrder.id;
+          // console.error(`[INFO] Take profit order set for ${coin} at $${exitPlan.profit_target}`);
+        } catch (tpError) {
+          const errorMsg = tpError instanceof Error ? tpError.message : String(tpError);
+          console.error(`[ERROR] Failed to set take profit:`, tpError);
+          slTpWarning = slTpWarning 
+            ? `${slTpWarning}; Take profit failed: ${errorMsg}`
+            : `Take profit failed: ${errorMsg}`;
         }
       }
     } catch (error) {
@@ -395,7 +266,6 @@ export class TradeExecutionTool {
   /**
    * 执行订单，如果订单太大则自动拆分
    * 使用二分法递归拆分直到满足交易所限制
-   * 支持合约交易和现货交易
    */
   private async executeOrderWithSplit(
     side: 'long' | 'short',
@@ -403,38 +273,19 @@ export class TradeExecutionTool {
     quantity: number,
     leverage: number,
     marginAmount: number,
-    splitCount: number = 0
+    splitCount: number = 1
   ): Promise<any> {
-    const maxSplits = 5;  // 最多拆分5次
-    
-    if (splitCount > maxSplits) {
-      throw new Error(`Order split limit reached (${maxSplits} splits). Order size too large.`);
-    }
+    const maxSplits = 4; // 最多拆分4次（最多16个订单）
     
     try {
-      const tradingMode = config.tradingMode || 'futures';
       console.log(`[ORDER-SPLIT] Attempting to execute order (split ${splitCount}):`);
-      console.log(`  - Trading Mode: ${tradingMode}`);
-      console.log(`  - Side: ${side}`);
       console.log(`  - Quantity: ${quantity}`);
-      console.log(`  - Leverage: ${leverage}x`);
-      console.log(`  - Margin: $${marginAmount.toFixed(2)}`);
+      console.log(`  - Margin per order: $${marginAmount}`);
       
-      // 根据交易模式选择执行方法
-      let order;
-      if (tradingMode === 'spot') {
-        // 现货交易：只支持买入（long），不支持做空
-        if (side === 'short') {
-          throw new Error('Spot trading does not support short selling. Use "sell" action to close positions.');
-        }
-        // 现货买入：使用市价单购买
-        order = await this.exchange.createMarketBuyOrder(`${coin}/USDT`, quantity);
-      } else {
-        // 合约交易：支持做多和做空
-        order = side === 'long'
-          ? await this.exchange.openLong(coin, quantity, leverage, marginAmount)
-          : await this.exchange.openShort(coin, quantity, leverage, marginAmount);
-      }
+      // 尝试执行订单
+      const order = side === 'long'
+        ? await this.exchange.openLong(coin, quantity, leverage, marginAmount)
+        : await this.exchange.openShort(coin, quantity, leverage, marginAmount);
       
       console.log(`[ORDER-SPLIT] Order executed successfully!`);
       return order;
@@ -442,11 +293,9 @@ export class TradeExecutionTool {
     } catch (error: any) {
       // 检查是否是"订单金额太大"的错误
       const errorMsg = error.message || String(error);
-      const isAmountTooLarge = errorMsg.includes('51201') ||  // 现货市价单限制 (1,000,000 USDT)
-                               errorMsg.includes('51202') ||  // 合约订单限制
+      const isAmountTooLarge = errorMsg.includes('51202') || 
                                errorMsg.includes('exceeds the maximum amount') ||
-                               errorMsg.includes('Market order amount exceeds') ||
-                               errorMsg.includes("can't exceed 1000000USDT");
+                               errorMsg.includes('Market order amount exceeds');
       
       if (isAmountTooLarge && splitCount < maxSplits) {
         console.log(`[ORDER-SPLIT] Order too large, splitting into 2 smaller orders...`);
@@ -624,18 +473,8 @@ export class TradeExecutionTool {
         const side = position.side === 'long' ? 'long' : 'short';
         // console.log(`[DEBUG] Closing ${side} position for ${coin}`);
         
-        // 根据交易模式选择平仓方法
-        const tradingMode = config.tradingMode || 'futures';
-        let order;
-        if (tradingMode === 'spot') {
-          // 现货交易：使用市价卖出
-          const quantity = position.contracts || 0;
-          console.log(`[SPOT] Selling ${quantity} ${coin} at market price`);
-          order = await this.exchange.createMarketSellOrder(`${coin}/USDT`, quantity);
-        } else {
-          // 合约交易：平仓
-          order = await this.exchange.closePosition(coin, side);
-        }
+        // 平仓
+        const order = await this.exchange.closePosition(coin, side);
         const exitPrice = await this.exchange.getPrice(coin);
         
         // 尝试在数据库中查找匹配的记录并更新状态
@@ -696,17 +535,8 @@ export class TradeExecutionTool {
     // 平仓（OKX 会自动取消关联的止损/止盈订单，无需手动取消）
     console.error(`[INFO] Closing ${trade.side} position for ${coin}...`);
     
-    // 根据交易模式选择平仓方法
-    const tradingMode = config.tradingMode || 'futures';
-    let order;
-    if (tradingMode === 'spot') {
-      // 现货交易：使用市价卖出
-      console.log(`[SPOT] Selling ${trade.quantity} ${coin} at market price`);
-      order = await this.exchange.createMarketSellOrder(`${coin}/USDT`, trade.quantity);
-    } else {
-      // 合约交易：平仓
-      order = await this.exchange.closePosition(coin, trade.side);
-    }
+    // Close position on exchange
+    const order = await this.exchange.closePosition(coin, trade.side);
 
     // Get exit price
     const exitPrice = await this.exchange.getPrice(coin);
@@ -936,99 +766,6 @@ export class TradeExecutionTool {
         success: false,
         message: 'Spot sell failed',
         error: error.message,
-      };
-    }
-  }
-
-  /**
-   * 现货卖出：直接卖出余额中的币种
-   */
-  private async sellSpot(coin: string, quantity?: number): Promise<TradeResponse> {
-    try {
-      console.log(`[SPOT] Selling ${coin}... (requested quantity: ${quantity || 'all'})`);
-      
-      // 获取当前余额
-      const balance = await this.exchange.getBalance();
-      console.log(`[SPOT] Full balance object for ${coin}:`, JSON.stringify(balance[coin], null, 2));
-      
-      const coinBalance = balance[coin];
-      const availableBalance = coinBalance?.free || coinBalance?.total || 0;
-      
-      console.log(`[SPOT] Available balance: ${availableBalance} ${coin}`);
-      
-      if (availableBalance <= 0) {
-        return {
-          success: false,
-          message: `No ${coin} balance to sell (available: ${availableBalance})`,
-          error: 'Insufficient balance',
-        };
-      }
-      
-      // 确定卖出数量
-      const sellQuantity = quantity && quantity <= availableBalance ? quantity : availableBalance;
-      
-      console.log(`[SPOT] Sell quantity calculation:`);
-      console.log(`  - Requested: ${quantity || 'all'}`);
-      console.log(`  - Available: ${availableBalance}`);
-      console.log(`  - Final: ${sellQuantity}`);
-      
-      // 检查最小交易数量
-      const minAmount = 0.000001; // OKX 最小精度
-      if (sellQuantity < minAmount) {
-        return {
-          success: false,
-          message: `Sell quantity ${sellQuantity} is below minimum ${minAmount} ${coin}`,
-          error: 'BelowMinimumAmount',
-        };
-      }
-      
-      // 执行市价卖出
-      const symbol = `${coin}/USDT`;
-      console.log(`[SPOT] Executing sell order: ${sellQuantity} ${coin}`);
-      const order = await this.exchange.getExchange().createMarketSellOrder(symbol, sellQuantity);
-      
-      console.log(`[SPOT] Sell order executed:`, order);
-      
-      // 获取成交价格
-      const exitPrice = order.average || order.price || 0;
-      const actualSold = order.filled || sellQuantity;
-      
-      // 从数据库查找买入记录，计算盈亏
-      const allTrades = await this.db.getAllTrades();
-      const buyTrade = allTrades.find(t => t.coin === coin && t.status === 'open');
-      
-      let netPnl = 0;
-      if (buyTrade) {
-        // 计算盈亏
-        const priceDiff = exitPrice - buyTrade.entry_price;
-        netPnl = priceDiff * actualSold;
-        
-        // 更新数据库记录
-        await this.db.updateTrade(buyTrade.position_id, {
-          exit_price: exitPrice,
-          exit_time: Math.floor(Date.now() / 1000),
-          net_pnl: netPnl,
-          status: 'closed',
-        });
-        
-        console.log(`[SPOT] Position closed. Entry: ${buyTrade.entry_price}, Exit: ${exitPrice}, PnL: ${netPnl.toFixed(2)}`);
-      } else {
-        console.warn(`[SPOT] No buy record found for ${coin}, cannot calculate PnL`);
-      }
-      
-      return {
-        success: true,
-        position_id: buyTrade?.position_id,
-        entry_price: buyTrade?.entry_price || 0,
-        quantity: actualSold,
-        message: `Successfully sold ${actualSold} ${coin} at $${exitPrice}${netPnl !== 0 ? `. Net P&L: $${netPnl.toFixed(2)}` : ''}`,
-      };
-    } catch (error: any) {
-      console.error(`[SPOT] Sell error:`, error);
-      return {
-        success: false,
-        message: `Failed to sell ${coin}`,
-        error: error.message || String(error),
       };
     }
   }
