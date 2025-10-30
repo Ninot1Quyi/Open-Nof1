@@ -17,6 +17,13 @@ echo "========================================="
 echo -e "${RED}  ⚠️  数据库完全重置${NC}"
 echo "========================================="
 echo ""
+
+# 读取当前的 INITIAL_BALANCE 配置
+INITIAL_BALANCE=${INITIAL_BALANCE:-10000}
+if [ -f .env ]; then
+  INITIAL_BALANCE=$(grep "^INITIAL_BALANCE=" .env | cut -d'=' -f2 || echo "10000")
+fi
+
 echo -e "${YELLOW}警告: 此操作将删除 nof1 数据库中的所有数据:${NC}"
 echo ""
 echo "包括:"
@@ -25,8 +32,11 @@ echo "  - 所有仓位记录 (positions)"
 echo "  - 所有已完成交易 (completed_trades)"
 echo "  - 所有对话记录 (agent_conversations)"
 echo "  - BTC Buy&Hold 基准数据 (btc_buyhold_baseline)"
+echo "    当前配置: INITIAL_BALANCE=\$${INITIAL_BALANCE}"
 echo "  - 所有 MCP 交易记录 (mcp_trades_*)"
 echo "  - 所有 MCP 快照记录 (mcp_snapshots_*)"
+echo ""
+echo -e "${BLUE}提示: 重置后，BTC Buy&Hold 将使用当前配置的初始资金重新初始化${NC}"
 echo ""
 read -p "确认要继续吗? (输入 'yes' 确认): " -r
 echo
@@ -49,6 +59,9 @@ TRUNCATE TABLE account_snapshots CASCADE;
 TRUNCATE TABLE positions CASCADE;
 TRUNCATE TABLE completed_trades CASCADE;
 TRUNCATE TABLE agent_conversations CASCADE;
+
+-- 清空 BTC Buy&Hold 基准数据
+-- 这将强制系统在下次启动时使用当前的 INITIAL_BALANCE 重新初始化
 TRUNCATE TABLE btc_buyhold_baseline CASCADE;
 
 -- 重置序列

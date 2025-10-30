@@ -188,7 +188,8 @@ router.get('/account-totals', async (req: Request, res: Response) => {
     res.json({
       accountTotals,
       lastHourlyMarkerRead: 0,
-      serverTime: Math.floor(Date.now() / 1000)
+      serverTime: Math.floor(Date.now() / 1000),
+      initialBalance: parseFloat(process.env.INITIAL_BALANCE || '10000')
     });
   } catch (error) {
     console.error('[API] Error in /api/account-totals:', error);

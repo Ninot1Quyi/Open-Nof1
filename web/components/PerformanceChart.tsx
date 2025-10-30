@@ -220,12 +220,30 @@ function Chart({
     return { xScale, yScale, xTickValues: tickValues }
   }, [transformedData, innerWidth, innerHeight, width])
 
-  // 过滤要显示的模型
+  // 过滤要显示的模型，并按照最新账户金额排序
+  // 金额低的先渲染（z-index 低），金额高的后渲染（z-index 高，显示在前面）
   const modelsToShow = useMemo(() => {
     if (selectedModel) {
       return [selectedModel]
     }
-    return Object.keys(dataByModel)
+    
+    const modelIds = Object.keys(dataByModel)
+    
+    // 按照最新的账户金额排序
+    return modelIds.sort((a, b) => {
+      const dataA = dataByModel[a]
+      const dataB = dataByModel[b]
+      
+      if (!dataA || dataA.length === 0) return -1
+      if (!dataB || dataB.length === 0) return 1
+      
+      // 获取最新的数据点（最后一个点）
+      const lastValueA = dataA[dataA.length - 1].value
+      const lastValueB = dataB[dataB.length - 1].value
+      
+      // 金额低的排前面（先渲染），金额高的排后面（后渲染，z-index 高）
+      return lastValueA - lastValueB
+    })
   }, [selectedModel, dataByModel])
 
   if (data.length === 0) {

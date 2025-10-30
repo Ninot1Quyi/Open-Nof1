@@ -39,7 +39,12 @@ export default async function handler(
     res.status(200).json(data)
   } catch (error) {
     console.error('✗ Account totals API error:', error)
-    // 返回空数组而不是错误，让前端能正常显示
-    res.status(200).json([])
+    // 返回空对象而不是错误，让前端能正常显示
+    res.status(200).json({ 
+      accountTotals: [], 
+      lastHourlyMarkerRead: 0, 
+      serverTime: Math.floor(Date.now() / 1000),
+      initialBalance: 10000
+    })
   }
 }

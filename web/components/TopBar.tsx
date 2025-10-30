@@ -24,6 +24,7 @@ interface CryptoPricesResponse {
 
 interface TopBarProps {
   accountTotals: any[]
+  initialBalance: number
 }
 
 const MODEL_NAMES: { [key: string]: string } = {
@@ -36,7 +37,7 @@ const MODEL_NAMES: { [key: string]: string } = {
   'btc-buy-hold': 'BTC Buy & Hold',
 }
 
-export default function TopBar({ accountTotals }: TopBarProps) {
+export default function TopBar({ accountTotals, initialBalance }: TopBarProps) {
   const [cryptoPrices, setCryptoPrices] = useState<CryptoPricesResponse | null>(null)
 
   // 获取实时币种价格
@@ -101,11 +102,10 @@ export default function TopBar({ accountTotals }: TopBarProps) {
     const lowest = sorted[sorted.length - 1]
 
     const calculateReturnPct = (account: any) => {
-      const initialValue = 10000
       if (!account || typeof account.currentValue !== 'number') {
         return 0
       }
-      return ((account.currentValue - initialValue) / initialValue) * 100
+      return ((account.currentValue - initialBalance) / initialBalance) * 100
     }
 
     return {

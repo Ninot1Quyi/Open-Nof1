@@ -6,6 +6,7 @@ import MainChart from '../components/MainChart'
 
 export default function Home() {
   const [accountTotals, setAccountTotals] = useState([])
+  const [initialBalance, setInitialBalance] = useState(10000)
 
   useEffect(() => {
     const fetchAccountTotals = async () => {
@@ -13,6 +14,9 @@ export default function Home() {
         const response = await fetch('/api/account-totals')
         const data = await response.json()
         setAccountTotals(data.accountTotals || [])
+        if (data.initialBalance) {
+          setInitialBalance(data.initialBalance)
+        }
       } catch (error) {
         console.error('Failed to fetch account totals:', error)
       }
@@ -74,7 +78,7 @@ export default function Home() {
           </div>
         </div>
 
-        <TopBar accountTotals={accountTotals} />
+        <TopBar accountTotals={accountTotals} initialBalance={initialBalance} />
 
         <main className="min-h-0 flex-1">
           <div className="flex h-full flex-col bg-background">
