@@ -133,9 +133,15 @@ export class ExchangeClient {
         })
         .map((pos: any) => {
           const symbol = pos.symbol?.split('/')[0] || '';
-          // OKX 使用 info.pos 字段表示持仓张数（正数=多仓，负数=空仓）
-          const posSize = parseFloat(String(pos.info?.pos || pos.contracts || '0'));
-          // contractSize 表示每张合约代表多少个币（通常是 0.01）
+          
+          // 获取持仓方向：优先使用 posSide，其次从 side 推导
+          // OKX API: posSide = 'long' | 'short' | 'net'
+          const posSide = pos.info?.posSide || pos.side;
+          const isShort = posSide === 'short';
+          
+          // OKX 使用 info.pos 字段表示持仓张数（绝对值）
+          const posSize = Math.abs(parseFloat(String(pos.info?.pos || pos.contracts || '0')));
+          // contractSize 表示每张合约代表多少个币
           const contractSize = parseFloat(String(pos.contractSize || '1'));
           // 实际币数量 = 合约张数 × 每张合约的币数量
           const quantity = posSize * contractSize;
@@ -149,9 +155,11 @@ export class ExchangeClient {
           const unrealizedPnl = parseFloat(String(pos.unrealizedPnl || pos.info?.upl || '0'));
           
           console.log(`[ExchangeClient] ${symbol} position:`, {
+            posSide,
             posSize,
             contractSize,
             quantity,
+            side: isShort ? 'short' : 'long',
             entryPrice,
             currentPrice,
             unrealizedPnl: `${unrealizedPnl} (from API)`
@@ -166,8 +174,8 @@ export class ExchangeClient {
 
           return {
             symbol,
-            side: quantity > 0 ? 'long' : 'short',  // 从 quantity 推导 side
-            quantity: Math.abs(quantity),  // 返回实际币数量（绝对值）
+            side: isShort ? 'short' : 'long',  // 使用 API 返回的方向
+            quantity,  // 返回实际币数量（绝对值）
             entryPrice,
             currentPrice,
             leverage,

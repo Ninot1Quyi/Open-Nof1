@@ -61,8 +61,8 @@ export default function TopBar({ accountTotals }: TopBarProps) {
     }
 
     fetchPrices()
-    // 每5秒刷新一次
-    const interval = setInterval(fetchPrices, 5000)
+    // 每10秒刷新一次
+    const interval = setInterval(fetchPrices, 10000)
     return () => clearInterval(interval)
   }, [])
 

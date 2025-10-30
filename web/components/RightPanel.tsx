@@ -222,7 +222,7 @@ export default function RightPanel() {
     }
 
     fetchPrices()
-    const interval = setInterval(fetchPrices, 3000) // 每3秒更新一次
+    const interval = setInterval(fetchPrices, 10000) // 每10秒更新一次
     return () => clearInterval(interval)
   }, [])
 
@@ -311,7 +311,7 @@ export default function RightPanel() {
             setConversations(data.conversations)
           }
         })
-    }, 3000)
+    }, 10000) // 每10秒更新一次
 
     return () => clearInterval(interval)
   }, [])

@@ -78,14 +78,16 @@ router.get('/account-totals', async (req: Request, res: Response) => {
               const tradeRecord = result.rows[0];
               
               // pos.quantity 已经是实际币数量（ExchangeClient 已经转换过了）
+              // 添加正负号：多头为正，空头为负
               const actualQuantity = pos.quantity;
+              const signedQuantity = side === 'short' ? -actualQuantity : actualQuantity;
               
               positionsBySymbol[coin] = {
                 symbol: coin,
                 side: side,
                 entry_price: pos.entryPrice,
                 current_price: pos.currentPrice,
-                quantity: actualQuantity,
+                quantity: signedQuantity,  // 带符号的数量
                 leverage: pos.leverage,
                 unrealized_pnl: pos.unrealizedPnl,
                 margin: pos.margin,
@@ -104,13 +106,14 @@ router.get('/account-totals', async (req: Request, res: Response) => {
             console.error(`[API] Error querying MCP database for ${coin}:`, dbError);
             // 即使数据库查询失败，也返回基本的持仓信息
             const actualQuantity = pos.quantity;
+            const signedQuantity = side === 'short' ? -actualQuantity : actualQuantity;
             
             positionsBySymbol[coin] = {
               symbol: coin,
               side: side,
               entry_price: pos.entryPrice,
               current_price: pos.currentPrice,
-              quantity: actualQuantity,
+              quantity: signedQuantity,  // 带符号的数量
               leverage: pos.leverage,
               unrealized_pnl: pos.unrealizedPnl,
               margin: pos.margin,
