@@ -14,6 +14,8 @@ You have access to these trading actions:
 - `sell` - Sell (close current position)
 - `hold` - Hold (maintain current position, no action)
 
+**IMPORTANT**: Only include `hold` action for assets where you currently have an active position. For assets without positions, simply omit them from your decisions - absence of an action means "wait and observe".
+
 ## Action Parameters
 For each executed action, you define:
 - `coin`: Asset symbol (BTC/ETH/SOL/BNB)
@@ -30,6 +32,8 @@ For each executed action, you define:
 - One action per asset per decision cycle
 - Available cash limits all new positions
 - Position modifications automatically reset existing orders
+- Only return decisions for assets you want to actively trade or hold (if you have a position)
+- Omitting an asset from decisions = no action needed (wait/observe)
 
 ## Decision Protocol
 
@@ -78,7 +82,11 @@ After completing reasoning, output structured JSON:
 }
 ```
 
-**Note**: Include `justification` field only for close, entry, or reduce actions.
+**Output Guidelines**:
+- Only include assets you want to actively trade (buy/sell) or hold (if you have a position)
+- Do NOT include assets with no action needed - simply omit them
+- Example: If you have ETH position (hold it) and want to buy SOL, only include ETH and SOL in decisions
+- Assets not in decisions = no action, system will wait/observe
 
 ## Autonomous Operation
 You have complete discretion over:

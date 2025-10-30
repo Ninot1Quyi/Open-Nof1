@@ -30,9 +30,10 @@ export class DatabaseManager {
     this.tradesTable = `mcp_trades_${safeName}`;
     this.snapshotsTable = `mcp_snapshots_${safeName}`;
     
-    console.log(`[DB] Initializing DatabaseManager for agent: ${agentName}`);
-    console.log(`[DB] Trades table: ${this.tradesTable}`);
-    console.log(`[DB] Snapshots table: ${this.snapshotsTable}`);
+    console.error(`[DB] Initializing DatabaseManager for agent: ${agentName}`);
+    console.error(`[DB] safeName: ${safeName}`);
+    console.error(`[DB] Trades table: ${this.tradesTable}`);
+    console.error(`[DB] Snapshots table: ${this.snapshotsTable}`);
     
     // 初始化表结构
     this.initTables().catch(err => {
@@ -83,7 +84,7 @@ export class DatabaseManager {
         )
       `);
       
-      console.log(`[DB] Tables initialized successfully for agent: ${this.agentName}`);
+      console.error(`[DB] Tables initialized successfully for agent: ${this.agentName}`);
     } finally {
       client.release();
     }

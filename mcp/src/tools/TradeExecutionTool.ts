@@ -224,26 +224,27 @@ export class TradeExecutionTool {
       // 继续执行，不因为止损/止盈设置失败而失败整个交易
     }
 
-    // Save trade to database
-    const positionId = uuidv4();
-    const tradeRecord: TradeRecord = {
+    // 保存交易记录到数据库
+    const positionId = `${coin}_${side}_${Date.now()}`;
+    const tradeRecord: Omit<import('../types.js').TradeRecord, 'exit_time' | 'exit_price' | 'net_pnl'> = {
       position_id: positionId,
       coin,
-      side,
+      side: side as 'long' | 'short',
       entry_price: currentPrice,
       quantity: totalQuantity,
       leverage,
-      entry_time: new Date(),
+      entry_time: Math.floor(Date.now() / 1000), // Unix timestamp in seconds
       margin: marginAmount,
       fees: totalFees,
       exit_plan: exitPlan,
-      confidence,
-      status: 'open',
+      confidence: confidence || 0.5,
+      status: 'open' as const,
       sl_oid: stopLossOrderId,
       tp_oid: takeProfitOrderId,
     };
-
+    
     await this.db.saveTrade(tradeRecord);
+    console.log(`[MCP] ✓ Saved trade record for ${coin} ${side}, position_id: ${positionId}`);
 
     const baseMessage = `Successfully opened ${side} position for ${coin}`;
     const finalMessage = slTpWarning 
@@ -551,17 +552,12 @@ export class TradeExecutionTool {
     const fees = parseFloat(String(order.fee?.cost || '0'));
     const netPnl = pnl - fees - trade.fees;
 
-    // Update trade record
-    await this.db.updateTrade(trade.position_id, {
-      exit_price: exitPrice,
-      exit_time: new Date(),
-      net_pnl: netPnl,
-      status: 'closed',
-    });
+    // 删除 exit_plan（平仓后不再需要）
+    await this.db.deleteExitPlan(coin, trade.side);
+    console.log(`[MCP] ✓ Deleted exit_plan for ${coin} ${trade.side}`);
 
     return {
       success: true,
-      position_id: trade.position_id,
       entry_price: trade.entry_price,
       message: `Successfully closed position for ${coin}. Net P&L: ${netPnl.toFixed(2)} USDT`,
     };

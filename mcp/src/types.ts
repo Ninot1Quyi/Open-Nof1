@@ -111,15 +111,16 @@ export interface TradeResponse {
 // ============= Exit Plan Update Types =============
 
 export interface UpdateExitPlanParams {
-  position_id: string;
+  coin: string;
+  side: 'long' | 'short';
   new_profit_target?: number;
   new_stop_loss?: number;
   new_invalidation?: string;
+  confidence?: number;
 }
 
 export interface UpdateExitPlanResponse {
   success: boolean;
-  position_id: string;
   updated_exit_plan: ExitPlan;
   message: string;
 }
@@ -166,8 +167,8 @@ export interface TradeRecord {
   exit_price?: number;
   quantity: number;
   leverage: number;
-  entry_time: Date;
-  exit_time?: Date;
+  entry_time: Date | number;  // Date object or Unix timestamp (seconds)
+  exit_time?: Date | number;  // Date object or Unix timestamp (seconds)
   margin: number;
   fees: number;
   net_pnl?: number;

@@ -23,6 +23,9 @@ import config from './config.js';
 import { v4 as uuidv4 } from 'uuid';
 
 // 从命令行参数获取 Agent 名称
+console.error('[MCP] process.argv:', process.argv);
+console.error('[MCP] process.argv[2]:', process.argv[2]);
+console.error('[MCP] process.env.AGENT_NAME:', process.env.AGENT_NAME);
 const agentName = process.argv[2] || process.env.AGENT_NAME || 'default';
 const logPrefix = `[${agentName}][MCP]`;
 console.log(`${logPrefix} Starting server for agent: ${agentName}`);
@@ -330,6 +333,10 @@ async function syncPositionsFromExchange(
     const leverage = parseFloat(String(pos.leverage || '1'));
     const side = pos.side === 'long' ? 'long' : 'short';
     
+    // Convert contracts to actual quantity based on contract size
+    const contractSize = parseFloat(String(pos.contractSize || '1'));
+    const actualQuantity = contracts * contractSize;
+    
     // 检查数据库中是否已有该币种的未平仓记录
     const existingTrades = await db.getAllTrades();
     const existingTrade = existingTrades.find(
@@ -348,7 +355,7 @@ async function syncPositionsFromExchange(
       coin,
       side: side as 'long' | 'short',
       entry_price: entryPrice,
-      quantity: contracts,
+      quantity: actualQuantity,  // Use actual quantity instead of contracts
       leverage,
       entry_time: pos.timestamp ? new Date(pos.timestamp) : new Date(),
       margin: parseFloat(String(pos.initialMargin || '0')),
@@ -360,7 +367,7 @@ async function syncPositionsFromExchange(
     
     await db.saveTrade(tradeRecord);
     syncedCount++;
-    // console.error(`${logPrefix} Synced ${side} position for ${coin}: ${contracts} @ ${entryPrice}`);
+    // console.error(`${logPrefix} Synced ${side} position for ${coin}: ${actualQuantity} @ ${entryPrice}`);
   }
   
   return syncedCount;

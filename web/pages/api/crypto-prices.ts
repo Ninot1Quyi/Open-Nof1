@@ -1,6 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 
-// 实时价格始终使用官方 API
+const DATA_SOURCE = process.env.NEXT_PUBLIC_DATA_SOURCE || 'custom'
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
@@ -8,13 +10,17 @@ export default async function handler(
   const maxRetries = 3
   const retryDelay = 5000 // 5秒
 
+  // 根据数据源选择 API
+  const apiUrl = DATA_SOURCE === 'official' 
+    ? 'https://nof1.ai/api/crypto-prices'
+    : `${BACKEND_URL}/api/crypto-prices`
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      // 实时价格数据始终从官方 API 获取
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒超时
 
-      const response = await fetch('https://nof1.ai/api/crypto-prices', {
+      const response = await fetch(apiUrl, {
         signal: controller.signal,
         headers: {
           'User-Agent': 'Mozilla/5.0',

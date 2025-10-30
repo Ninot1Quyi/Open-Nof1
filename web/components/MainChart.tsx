@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import PerformanceChart from './PerformanceChart'
 import ModelCard from './ModelCard'
 
@@ -42,41 +42,64 @@ export default function MainChart() {
   const [displayMode, setDisplayMode] = useState<'$' | '%'>('$')
   const [baseChartData, setBaseChartData] = useState<any[]>([]) // 存储API获取的基础数据
   const [baseAccountTotals, setBaseAccountTotals] = useState<AccountData[]>([]) // 存储API获取的基础账户数据
+  const [cryptoPrices, setCryptoPrices] = useState<{[key: string]: {price: number}} | null>(null) // 实时币价
+  const [lastApiTimestamp, setLastApiTimestamp] = useState<number>(0) // 最后一次API获取的时间戳
+  
+  // 使用 ref 保存最新的状态，避免闭包问题
+  const baseChartDataRef = useRef<any[]>([])
+  const baseAccountTotalsRef = useRef<AccountData[]>([])
+  const lastApiTimestampRef = useRef<number>(0)
+  const cryptoPricesRef = useRef<{[key: string]: {price: number}} | null>(null)
 
-  // 统一的实时计算函数 - 基于基础数据计算快照
-  const calculateSnapshot = (baseAccounts: AccountData[], baseChart: any[]) => {
-    const now = Date.now()
+  // 获取实时币价
+  useEffect(() => {
+    const fetchPrices = () => {
+      fetch('/api/crypto-prices')
+        .then(res => res.json())
+        .then(data => {
+          if (data.prices) {
+            setCryptoPrices(data.prices)
+            cryptoPricesRef.current = data.prices  // 同步更新 ref
+          }
+        })
+        .catch(err => console.error('Failed to fetch crypto prices:', err))
+    }
+
+    fetchPrices()
+    const interval = setInterval(fetchPrices, 3000) // 每3秒更新一次
+    return () => clearInterval(interval)
+  }, [])
+
+  // 根据实时币价计算账户价值
+  const calculateRealtimeAccountValue = (account: any) => {
+    if (!account || !account.positions || !cryptoPrices) {
+      return account?.dollar_equity || 0
+    }
+
+    // 计算实时未实现盈亏
+    let realtimeUnrealizedPnl = 0
     
-    // 计算每个模型的快照equity
-    const snapshotAccounts = baseAccounts.map(account => {
-      // 简化版本：使用小的随机波动模拟实时变化
-      // 实际应用中，这里应该根据持仓和当前币价计算
-      const volatility = account.dollar_equity * 0.001 // 0.1%的波动
-      const randomChange = (Math.random() - 0.5) * volatility
+    Object.entries(account.positions).forEach(([symbol, position]: [string, any]) => {
+      const priceData = cryptoPrices[symbol]
+      const currentPrice = priceData?.price || 0
       
-      return {
-        ...account,
-        dollar_equity: account.dollar_equity + randomChange,
+      if (currentPrice && position?.entry_price && position?.quantity) {
+        const priceDiff = currentPrice - position.entry_price
+        // quantity 的正负号表示多空：正数=多头，负数=空头
+        // 盈亏 = (当前价 - 入场价) × quantity（带符号）
+        const pnl = priceDiff * position.quantity
+        realtimeUnrealizedPnl += pnl
       }
     })
+
+    // 实时账户价值 = dollar_equity - total_unrealized_pnl + 实时未实现盈亏
+    const dollarEquity = account.dollar_equity || 0
+    const oldUnrealizedPnl = account.total_unrealized_pnl || 0
     
-    // 生成快照图表数据点
-    const snapshotChartPoints = snapshotAccounts.map(account => ({
-      timestamp: now,
-      value: account.dollar_equity,
-      modelId: account.model_id,
-    }))
-    
-    // 合并基础图表数据和快照点
-    const updatedChartData = [...baseChart, ...snapshotChartPoints]
-    
-    return {
-      accounts: snapshotAccounts,
-      chartData: updatedChartData,
-    }
+    return dollarEquity - oldUnrealizedPnl + realtimeUnrealizedPnl
   }
 
-  // 每60秒获取完整的历史数据（真实API数据）
+  // 每3秒获取完整的历史数据（真实API数据）
   useEffect(() => {
     const fetchData = () => {
       fetch('/api/account-history')
@@ -84,17 +107,12 @@ export default function MainChart() {
         .then((data) => {
           const allAccounts = data.accountTotals || []
           
-          // 获取每个模型的最新数据
-          const latestByModel = new Map<string, AccountData>()
+          // 获取每个模型的最新数据（保留完整的 account 对象，包含 positions）
+          const latestByModel = new Map<string, any>()
           allAccounts.forEach((account: any) => {
             const existing = latestByModel.get(account.model_id)
             if (!existing || account.timestamp > existing.timestamp) {
-              latestByModel.set(account.model_id, {
-                model_id: account.model_id,
-                dollar_equity: account.dollar_equity,
-                total_unrealized_pnl: account.total_unrealized_pnl,
-                timestamp: account.timestamp,
-              })
+              latestByModel.set(account.model_id, account)
             }
           })
           
@@ -107,47 +125,91 @@ export default function MainChart() {
             modelId: account.model_id,
           }))
           
-          console.log('📊 API data loaded (60s):', {
+          const now = Date.now()
+          
+          console.log('📊 API data loaded (3s):', {
             totalPoints: chartPoints.length,
             models: Array.from(new Set(chartPoints.map((p: any) => p.modelId))),
+            latestValues: latestAccounts.map(a => ({ model: a.model_id, value: a.dollar_equity }))
           })
           
-          // 更新基础数据
+          // 更新基础数据和时间戳
           setBaseChartData(chartPoints)
           setBaseAccountTotals(latestAccounts)
+          setLastApiTimestamp(now)
           
-          // 立即同步更新所有显示数据
+          // 同时更新 ref
+          baseChartDataRef.current = chartPoints
+          baseAccountTotalsRef.current = latestAccounts
+          lastApiTimestampRef.current = now
+          
+          // 立即同步更新账户数据
           setAccountTotals(latestAccounts)
-          setChartData(chartPoints)
+          
+          // 如果有币价数据，立即计算并添加实时数据点
+          const currentCryptoPrices = cryptoPricesRef.current
+          if (currentCryptoPrices) {
+            const realtimeNow = Date.now()
+            const realtimePoints = latestAccounts.map(account => ({
+              timestamp: realtimeNow,
+              value: calculateRealtimeAccountValue(account),
+              modelId: account.model_id,
+            }))
+            const updatedChartData = [...chartPoints, ...realtimePoints]
+            setChartData(updatedChartData)
+          } else {
+            // 没有币价数据时，使用原始数据
+            setChartData(chartPoints)
+          }
         })
         .catch((err) => console.error('Failed to fetch account totals:', err))
     }
 
     fetchData()
-    const interval = setInterval(fetchData, 60000) // 每60秒更新真实数据
+    const interval = setInterval(fetchData, 15000) // 每15秒更新历史数据
     return () => clearInterval(interval)
   }, [])
 
-  // 每3秒计算并同步更新所有数据
+  // 每3秒更新一次实时数据点（与币价更新同步）
   useEffect(() => {
-    if (baseAccountTotals.length === 0 || baseChartData.length === 0) {
-      return // 等待基础数据加载
+    if (!cryptoPrices) {
+      return
     }
 
-    const updateAllData = () => {
-      // 统一计算快照
-      const snapshot = calculateSnapshot(baseAccountTotals, baseChartData)
+    const updateRealtimeData = () => {
+      // 使用 ref 获取最新的状态
+      const currentBaseAccountTotals = baseAccountTotalsRef.current
+      const currentBaseChartData = baseChartDataRef.current
       
-      // 同步更新所有数据
-      setAccountTotals(snapshot.accounts)
-      setChartData(snapshot.chartData)
-      
-      console.log('📸 Snapshot updated (3s) - all data synced:', snapshot.accounts.length, 'models')
+      if (currentBaseAccountTotals.length === 0 || currentBaseChartData.length === 0) {
+        return
+      }
+
+      // 为每个账户计算实时价值
+      const now = Date.now()
+      const realtimePoints = currentBaseAccountTotals.map(account => ({
+        timestamp: now,
+        value: calculateRealtimeAccountValue(account),
+        modelId: account.model_id,
+      }))
+
+      // 直接使用 baseChartData（纯历史数据）+ 实时数据点
+      const updatedChartData = [...currentBaseChartData, ...realtimePoints]
+      setChartData(updatedChartData)
+
+      console.log('📈 Realtime chart data updated:', realtimePoints.map(p => ({ 
+        model: p.modelId, 
+        value: p.value 
+      })))
     }
 
-    const interval = setInterval(updateAllData, 3000) // 每3秒更新快照
+    // 立即更新一次
+    updateRealtimeData()
+
+    // 每3秒更新一次
+    const interval = setInterval(updateRealtimeData, 3000)
     return () => clearInterval(interval)
-  }, [baseAccountTotals, baseChartData])
+  }, [cryptoPrices])
 
 
   // 按顺序排序的账户
@@ -215,6 +277,14 @@ export default function MainChart() {
 
             <div className="absolute left-1/2 top-1 md:top-2 z-10 -translate-x-1/2 transform">
               <div className="flex flex-row items-center gap-2">
+                {selectedModel && (
+                  <button
+                    onClick={() => setSelectedModel(null)}
+                    className="cursor-pointer border border-green-800 bg-green-600 px-1.5 py-0.5 md:px-3 md:py-1 font-mono text-[8px] md:text-xs font-medium text-white transition-none hover:bg-green-700"
+                  >
+                    BACK TO ALL
+                  </button>
+                )}
                 <h2 className="terminal-text text-xs md:text-sm font-bold text-black">TOTAL ACCOUNT VALUE</h2>
               </div>
             </div>
@@ -243,12 +313,25 @@ export default function MainChart() {
       <div className="flex-shrink-0 bg-white hidden md:block">
           <div className="relative bg-surface p-1 md:p-3 md:border-t-2 md:border-border">
             <div className="flex w-full flex-col items-start gap-3 sm:flex-row">
+              {selectedModel && (
+                <button
+                  onClick={() => setSelectedModel(null)}
+                  className="flex items-center gap-2 cursor-pointer border-2 border-gray-600 bg-white px-4 py-2 font-mono text-sm font-medium text-gray-700 transition-all hover:bg-gray-100"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                  </svg>
+                  BACK
+                </button>
+              )}
               <div className="flex-1 w-full">
                 <div className="flex flex-wrap gap-1 md:gap-2 w-full justify-center">
                   {sortedAccounts.map((account) => {
                     const initialValue = 10000
+                    // 使用实时币价计算账户价值
+                    const realtimeValue = calculateRealtimeAccountValue(account)
                     const percentChange =
-                      ((account.dollar_equity - initialValue) / initialValue) *
+                      ((realtimeValue - initialValue) / initialValue) *
                       100
 
                     return (
@@ -257,7 +340,7 @@ export default function MainChart() {
                         modelId={account.model_id}
                         modelName={MODEL_NAMES[account.model_id] || account.model_id.toUpperCase()}
                         logoPath={`/logos/${account.model_id.replace(/-/g, '_')}_logo.png`}
-                        currentValue={account.dollar_equity}
+                        currentValue={realtimeValue}
                         percentChange={percentChange}
                         isSelected={selectedModel === account.model_id}
                         onClick={() =>

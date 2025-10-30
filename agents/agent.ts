@@ -89,7 +89,7 @@ export class TradingAgent {
       throw new Error('modelId is required in AgentConfig or MODEL_ID environment variable');
     }
 
-    this.prompter = new Prompter();
+    this.prompter = new Prompter(modelId); // 传递 modelId 以使用相同的 MCP 客户端
     this.mcpClient = getMCPClient(modelId); // 获取MCP客户端实例，传递 modelId
     this.config = {
       modelId,
@@ -234,6 +234,17 @@ export class TradingAgent {
         // 提取JSON之前的部分作为推理过程
         const jsonStart = rawResponse.indexOf(jsonMatch[0]);
         reasoning = rawResponse.substring(0, jsonStart).trim();
+        
+        // 清理 reasoning：
+        // 1. 去掉 "Phase 2: Execution Output" 及其后面的内容
+        const phase2Index = reasoning.search(/###?\s*Phase 2[:\s]/i);
+        if (phase2Index !== -1) {
+          reasoning = reasoning.substring(0, phase2Index).trim();
+        }
+        
+        // 2. 去掉开头的 "Phase 1:" 标题
+        reasoning = reasoning.replace(/^###?\s*Phase 1[:\s][^\n]*\n*/i, '').trim();
+        
       } catch (e) {
         this.warn('Failed to parse JSON from AI response: ' + e);
       }
@@ -337,13 +348,20 @@ export class TradingAgent {
             break;
 
           case 'hold':
-            this.log(`${coin}: Holding position, no action needed`);
-            executionResults.push({
-              coin,
-              signal: 'hold',
-              success: true,
-              message: 'Position held',
-            });
+            // 检查是否真的有仓位，如果没有仓位则跳过
+            const hasPosition = await this.checkIfPositionExists(coin);
+            if (hasPosition) {
+              this.log(`${coin}: Holding position, no action needed`);
+              executionResults.push({
+                coin,
+                signal: 'hold',
+                success: true,
+                message: 'Position held',
+              });
+            } else {
+              this.log(`${coin}: No position to hold, skipping`);
+              // 不添加到 executionResults，因为这个操作没有意义
+            }
             break;
 
           default:
@@ -541,6 +559,28 @@ export class TradingAgent {
   }
 
   /**
+   * 检查是否存在指定币种的仓位
+   */
+  private async checkIfPositionExists(coin: string): Promise<boolean> {
+    try {
+      const accountState = await this.mcpClient.getAccountState({
+        include_positions: true,
+        include_performance: false,
+        include_history: false
+      });
+      
+      if (!accountState.active_positions || accountState.active_positions.length === 0) {
+        return false;
+      }
+      
+      return accountState.active_positions.some((pos: any) => pos.coin === coin);
+    } catch (error) {
+      console.error(`[ERROR] Failed to check position for ${coin}:`, error);
+      return false; // 出错时假设没有仓位
+    }
+  }
+
+  /**
    * 保存响应到日志
    */
   private saveResponse(
@@ -577,6 +617,35 @@ export class TradingAgent {
     cycleId: number
   ): Promise<void> {
     try {
+      // 获取当前账户状态，用于填充 hold 操作的实际数量
+      let accountState;
+      try {
+        accountState = await this.mcpClient.getAccountState({
+          include_positions: true,
+          include_performance: false,
+          include_history: false
+        });
+      } catch (error) {
+        console.warn('[DB] Failed to fetch account state for hold quantity update');
+      }
+
+      // 深拷贝 decisions，避免修改原始对象
+      const decisionsToSave = JSON.parse(JSON.stringify(aiResponse.decisions || {}));
+      
+      // 更新 hold 操作的 quantity 为实际仓位数量
+      if (accountState?.active_positions) {
+        for (const coin in decisionsToSave) {
+          const decision = decisionsToSave[coin];
+          if (decision?.trade_signal_args?.signal === 'hold') {
+            const position = accountState.active_positions.find((pos: any) => pos.coin === coin);
+            if (position) {
+              decision.trade_signal_args.quantity = position.quantity;
+              console.log(`[DB] Updated hold quantity for ${coin}: ${position.quantity}`);
+            }
+          }
+        }
+      }
+
       const client = await this.dbPool.connect();
       try {
         const conversationId = `${this.config.modelId}_${cycleId}`;
@@ -597,8 +666,8 @@ export class TradingAgent {
             this.config.modelId,
             cycleId,
             userPrompt,
-            JSON.stringify(aiResponse.decisions),
-            JSON.stringify({ raw_response: aiResponse.raw_response }),
+            JSON.stringify(decisionsToSave),
+            JSON.stringify(aiResponse.reasoning || ''),  // 将文本包装成 JSON 字符串
             aiResponse.cot_trace_summary,
             insertedAt
           ]

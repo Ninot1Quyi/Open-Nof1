@@ -30,13 +30,20 @@ export class DatabaseManager {
     this.tradesTable = `mcp_trades_${safeName}`;
     this.snapshotsTable = `mcp_snapshots_${safeName}`;
     
-    console.log(`[DB] Initializing DatabaseManager for agent: ${agentName}`);
-    console.log(`[DB] Trades table: ${this.tradesTable}`);
-    console.log(`[DB] Snapshots table: ${this.snapshotsTable}`);
+    console.error(`[DB] Initializing DatabaseManager for agent: ${agentName}`);
+    console.error(`[DB] safeName: ${safeName}`);
+    console.error(`[DB] Trades table: ${this.tradesTable}`);
+    console.error(`[DB] Snapshots table: ${this.snapshotsTable}`);
+    console.error(`[DB] Database: ${process.env.DB_NAME || 'nof1'}`);
+    console.error(`[DB] Host: ${process.env.DB_HOST || 'localhost'}`);
+    console.error(`[DB] User: ${process.env.DB_USER || 'OpenNof1'}`);
     
-    // 初始化表结构
-    this.initTables().catch(err => {
-      console.error('[DB] Failed to initialize tables:', err);
+    // 初始化表结构（同步等待）
+    this.initTables().then(() => {
+      console.error('[DB] ✓ Tables initialization completed');
+    }).catch(err => {
+      console.error('[DB] ✗ Failed to initialize tables:', err);
+      console.error('[DB] Error stack:', err.stack);
     });
   }
 
@@ -44,9 +51,13 @@ export class DatabaseManager {
    * 初始化数据库表结构
    */
   private async initTables(): Promise<void> {
+    console.error(`[DB] Starting initTables() for agent: ${this.agentName}`);
     const client = await this.pool.connect();
     try {
+      console.error(`[DB] Database connection established`);
+      
       // 创建交易记录表（使用 Agent 特定的表名）
+      console.error(`[DB] Creating trades table: ${this.tradesTable}`);
       await client.query(`
         CREATE TABLE IF NOT EXISTS ${this.tradesTable} (
           position_id TEXT PRIMARY KEY,
@@ -55,8 +66,8 @@ export class DatabaseManager {
           entry_price NUMERIC NOT NULL,
           quantity NUMERIC NOT NULL,
           leverage INTEGER NOT NULL,
-          entry_time TIMESTAMP NOT NULL,
-          exit_time TIMESTAMP,
+          entry_time BIGINT NOT NULL,
+          exit_time BIGINT,
           exit_price NUMERIC,
           margin NUMERIC NOT NULL,
           fees NUMERIC DEFAULT 0,
@@ -66,11 +77,14 @@ export class DatabaseManager {
           status TEXT NOT NULL DEFAULT 'open',
           sl_oid TEXT,
           tp_oid TEXT,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      console.error(`[DB] ✓ Trades table created: ${this.tradesTable}`);
       
       // 创建性能快照表（使用 Agent 特定的表名）
+      console.error(`[DB] Creating snapshots table: ${this.snapshotsTable}`);
       await client.query(`
         CREATE TABLE IF NOT EXISTS ${this.snapshotsTable} (
           id SERIAL PRIMARY KEY,
@@ -82,33 +96,101 @@ export class DatabaseManager {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      console.error(`[DB] ✓ Snapshots table created: ${this.snapshotsTable}`);
       
-      console.log(`[DB] Tables initialized successfully for agent: ${this.agentName}`);
+      console.error(`[DB] Tables initialized successfully for agent: ${this.agentName}`);
+    } catch (error) {
+      console.error(`[DB] ✗ Error in initTables():`, error);
+      throw error;
+    } finally {
+      client.release();
+      console.error(`[DB] Database connection released`);
+    }
+  }
+
+  /**
+   * 保存或更新 exit_plan（通过 coin + side）
+   * 注意：这个方法现在只更新已存在的交易记录
+   */
+  async saveExitPlan(coin: string, side: string, exitPlan: any, confidence?: number): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query(
+        `UPDATE ${this.tradesTable} SET
+           exit_plan = $3,
+           confidence = $4,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE coin = $1 AND side = $2 AND status = 'open'`,
+        [coin, side, exitPlan ? JSON.stringify(exitPlan) : null, confidence]
+      );
     } finally {
       client.release();
     }
   }
 
   /**
-   * Save a new trade
+   * 获取 exit_plan（通过 coin + side）
    */
-  async saveTrade(trade: TradeRecord): Promise<void> {
+  async getExitPlan(coin: string, side: string): Promise<{
+    exit_plan: any;
+    confidence?: number;
+  } | null> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `SELECT exit_plan, confidence FROM ${this.tradesTable}
+         WHERE coin = $1 AND side = $2 AND status = 'open'
+         ORDER BY created_at DESC LIMIT 1`,
+        [coin, side]
+      );
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+      
+      return {
+        exit_plan: result.rows[0].exit_plan,
+        confidence: result.rows[0].confidence ? parseFloat(result.rows[0].confidence) : undefined,
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * 删除 exit_plan（平仓时调用）
+   * 注意：这个方法现在只清空 exit_plan，不删除记录
+   */
+  async deleteExitPlan(coin: string, side: string): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query(
-        `INSERT INTO ${this.tradesTable} (
-          position_id, coin, side, entry_price, quantity, leverage,
-          entry_time, margin, fees, exit_plan, confidence, status, sl_oid, tp_oid
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-        ON CONFLICT (position_id) DO UPDATE SET
-          quantity = $5,
-          margin = $8,
-          fees = $9,
-          exit_plan = $10,
-          confidence = $11,
-          status = $12,
-          sl_oid = $13,
-          tp_oid = $14`,
+        `UPDATE ${this.tradesTable} SET
+           exit_plan = NULL,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE coin = $1 AND side = $2 AND status = 'open'`,
+        [coin, side]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Save a new trade record
+   */
+  async saveTrade(trade: Omit<TradeRecord, 'exit_time' | 'exit_price' | 'net_pnl'>): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      // Convert Date to Unix timestamp if needed
+      const entryTime = trade.entry_time instanceof Date 
+        ? Math.floor(trade.entry_time.getTime() / 1000) 
+        : trade.entry_time;
+
+      await client.query(
+        `INSERT INTO ${this.tradesTable} 
+         (position_id, coin, side, entry_price, quantity, leverage, entry_time, margin, fees, exit_plan, confidence, status, sl_oid, tp_oid)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [
           trade.position_id,
           trade.coin,
@@ -116,14 +198,14 @@ export class DatabaseManager {
           trade.entry_price,
           trade.quantity,
           trade.leverage,
-          trade.entry_time,
+          entryTime,
           trade.margin,
           trade.fees || 0,
           trade.exit_plan ? JSON.stringify(trade.exit_plan) : null,
           trade.confidence,
-          trade.status,
-          trade.sl_oid,
-          trade.tp_oid,
+          trade.status || 'open',
+          trade.sl_oid || null,
+          trade.tp_oid || null,
         ]
       );
     } finally {
@@ -217,7 +299,7 @@ export class DatabaseManager {
   async getAllTrades(): Promise<TradeRecord[]> {
     const client = await this.pool.connect();
     try {
-      const result = await client.query(`SELECT * FROM ${this.tradesTable} ORDER BY entry_time DESC`);
+      const result = await client.query(`SELECT * FROM ${this.tradesTable} ORDER BY created_at DESC`);
       return result.rows.map(row => this.rowToTradeRecord(row));
     } finally {
       client.release();

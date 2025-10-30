@@ -73,7 +73,7 @@ fi
 # 5. 初始化数据库表
 echo -n "5. 初始化数据库表... "
 cd "$PROJECT_ROOT/backend"
-psql -d ai_trading -f database/schema.sql > /dev/null 2>&1
+psql -d nof1 -f database/schema.sql > /dev/null 2>&1
 echo -e "${GREEN}✓${NC}"
 
 # 6. 检查后端配置
@@ -234,7 +234,7 @@ echo "  后端: tail -f logs/backend.log"
 echo "  前端: tail -f logs/frontend.log"
 echo "  Agents: tail -f logs/agents.log"
 echo ""
-echo -e "${YELLOW}提示: DataCollector 每15秒收集一次数据${NC}"
+echo -e "${YELLOW}提示: DataCollector 每3秒收集一次实时数据${NC}"
 echo ""
 
 # 打开浏览器

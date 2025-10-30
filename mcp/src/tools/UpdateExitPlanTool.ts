@@ -10,46 +10,34 @@ export class UpdateExitPlanTool {
   constructor(private db: DatabaseManager) {}
 
   async execute(params: UpdateExitPlanParams): Promise<UpdateExitPlanResponse> {
-    const { position_id, new_profit_target, new_stop_loss, new_invalidation } = params;
+    const { coin, side, new_profit_target, new_stop_loss, new_invalidation, confidence } = params;
 
     try {
-      // Get existing trade
-      const trade = await this.db.getTrade(position_id);
+      // 获取现有的 exit_plan
+      const existing = await this.db.getExitPlan(coin, side);
       
-      if (!trade) {
+      if (!existing) {
         return {
           success: false,
-          position_id,
           updated_exit_plan: {},
-          message: 'Position not found',
+          message: `No exit plan found for ${coin} ${side}`,
         };
       }
 
-      if (trade.status === 'closed') {
-        return {
-          success: false,
-          position_id,
-          updated_exit_plan: trade.exit_plan || {},
-          message: 'Cannot update exit plan for closed position',
-        };
-      }
-
-      // Update exit plan
+      // 更新 exit_plan
       const updatedExitPlan: ExitPlan = {
-        ...trade.exit_plan,
-        profit_target: new_profit_target ?? trade.exit_plan?.profit_target,
-        stop_loss: new_stop_loss ?? trade.exit_plan?.stop_loss,
-        invalidation: new_invalidation ?? trade.exit_plan?.invalidation,
+        ...existing.exit_plan,
+        profit_target: new_profit_target ?? existing.exit_plan?.profit_target,
+        stop_loss: new_stop_loss ?? existing.exit_plan?.stop_loss,
+        invalidation: new_invalidation ?? existing.exit_plan?.invalidation,
       };
 
-      // Save to database
-      await this.db.updateTrade(position_id, {
-        exit_plan: updatedExitPlan,
-      });
+      // 保存到数据库
+      await this.db.saveExitPlan(coin, side, updatedExitPlan, confidence ?? existing.confidence);
+      console.log(`[MCP] ✓ Updated exit_plan for ${coin} ${side}:`, updatedExitPlan);
 
       return {
         success: true,
-        position_id,
         updated_exit_plan: updatedExitPlan,
         message: 'Exit plan updated successfully',
       };
@@ -57,7 +45,6 @@ export class UpdateExitPlanTool {
       console.error('Error updating exit plan:', error);
       return {
         success: false,
-        position_id,
         updated_exit_plan: {},
         message: 'Failed to update exit plan',
       };

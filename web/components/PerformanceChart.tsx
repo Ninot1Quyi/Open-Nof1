@@ -7,7 +7,7 @@ import { AxisBottom, AxisLeft } from '@visx/axis'
 import { GridRows, GridColumns } from '@visx/grid'
 import { Group } from '@visx/group'
 import { scaleTime, scaleLinear } from '@visx/scale'
-import { LinePath } from '@visx/shape'
+import { LinePath, AreaClosed } from '@visx/shape'
 import { curveLinear } from '@visx/curve'
 import { ParentSize } from '@visx/responsive'
 import { localPoint } from '@visx/event'
@@ -23,8 +23,8 @@ const MODEL_COLORS: { [key: string]: string } = {
   'grok-4': 'rgb(0, 0, 0)',
   'deepseek-chat-v3.1': 'rgb(77, 107, 254)',
   'qwen3-max': 'rgb(139, 92, 246)',
-  'buynhold_btc': 'rgb(247, 147, 26)',
-  'btc-buy-hold': 'rgb(247, 147, 26)',
+  'buynhold_btc': 'rgb(156, 163, 175)',
+  'btc-buy-hold': 'rgb(156, 163, 175)',
 }
 
 const MODEL_NAMES: { [key: string]: string } = {
@@ -181,19 +181,23 @@ function Chart({
   }, [transformedData, displayMode, timeRange])
 
   // 计算比例尺
-  const { xScale, yScale } = useMemo(() => {
+  const { xScale, yScale, xTickValues } = useMemo(() => {
     if (transformedData.length === 0) {
       return {
         xScale: scaleTime({ domain: [0, 1], range: [0, innerWidth] }),
         yScale: scaleLinear({ domain: [0, 1], range: [innerHeight, 0] }),
+        xTickValues: [],
       }
     }
 
     const timestamps = transformedData.map((d) => d.timestamp)
     const values = transformedData.map((d) => d.value)
 
+    const minTime = Math.min(...timestamps)
+    const maxTime = Math.max(...timestamps)
+
     const xScale = scaleTime({
-      domain: [Math.min(...timestamps), Math.max(...timestamps)],
+      domain: [minTime, maxTime],
       range: [0, innerWidth],
     })
 
@@ -203,8 +207,18 @@ function Chart({
       nice: true,
     })
 
-    return { xScale, yScale }
-  }, [transformedData, innerWidth, innerHeight])
+    // 根据宽度动态生成刻度值（与官方逻辑一致）
+    const numTicks = width < 300 ? 1 : width < 400 ? 2 : width < 500 ? 3 : width < 600 ? 4 : width < 800 ? 5 : 8
+    const [minDate, maxDate] = xScale.domain()
+    const timeSpan = maxDate.getTime() - minDate.getTime()
+    const tickInterval = timeSpan / (numTicks - 1)
+    
+    const tickValues: Date[] = Array.from({ length: numTicks }, (_, i) => 
+      new Date(minDate.getTime() + i * tickInterval)
+    )
+
+    return { xScale, yScale, xTickValues: tickValues }
+  }, [transformedData, innerWidth, innerHeight, width])
 
   // 过滤要显示的模型
   const modelsToShow = useMemo(() => {
@@ -306,6 +320,16 @@ function Chart({
             <circle cx="-2" cy="0" r="12.6" fill="rgba(128, 128, 128, 0.6)" stroke="#5a5a5a" strokeWidth="1.5" strokeDasharray="2,2" />
             <image href="/logos_white/btc_white.png" x="-12.2" y="-10.2" width="20.4" height="20.4" clipPath="url(#circle-clip)" className="chart-icon grok-white" />
           </g>
+
+          {/* Threshold colors for profit/loss */}
+          <linearGradient id="area-gradient-profit" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#22c55e" stopOpacity="0.2" />
+            <stop offset="100%" stopColor="#22c55e" stopOpacity="0.05" />
+          </linearGradient>
+          <linearGradient id="area-gradient-loss" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#dc2626" stopOpacity="0.2" />
+            <stop offset="100%" stopColor="#dc2626" stopOpacity="0.05" />
+          </linearGradient>
         </defs>
 
         <Group transform={`translate(${margin.left}, ${margin.top})`}>
@@ -355,6 +379,9 @@ function Chart({
             const lastPoint = modelData[modelData.length - 1]
             const lastX = xScale(lastPoint.timestamp)
             const lastY = yScale(lastPoint.value)
+            
+            // 圆球半径（与 defs 中定义的一致）
+            const circleRadius = modelId.includes('buynhold') ? 12.6 : 15.75
 
             const modelColor = MODEL_COLORS[modelId] || 'rgb(0, 0, 0)'
             const isHovered = hoveredModelId === modelId
@@ -362,8 +389,87 @@ function Chart({
             
             return (
               <g key={modelId}>
+                {/* Area fill - only show when model is selected */}
+                {selectedModel === modelId && modelData.length > 0 && (
+                  <>
+                    {/* Initial balance threshold line (invisible, for reference) */}
+                    {displayMode === '$' && (() => {
+                      const initialBalance = 10000;
+                      const thresholdY = yScale(initialBalance);
+                      
+                      // Create data with initial point
+                      const minTimestamp = Math.min(...modelData.map(d => d.timestamp));
+                      const dataWithInitial = [
+                        { timestamp: minTimestamp, value: initialBalance, modelId },
+                        ...modelData
+                      ];
+                      
+                      return (
+                        <>
+                          {/* Profit area (above threshold) - Green */}
+                          <defs>
+                            <clipPath id={`threshold-clip-above-${modelId}`}>
+                              <rect x="0" y="0" width={innerWidth} height={thresholdY} />
+                            </clipPath>
+                            <clipPath id={`threshold-clip-below-${modelId}`}>
+                              <rect x="0" y={thresholdY} width={innerWidth} height={innerHeight - thresholdY} />
+                            </clipPath>
+                          </defs>
+                          
+                          {/* Green area for profit */}
+                          <AreaClosed
+                            data={dataWithInitial}
+                            x={(d) => xScale(d.timestamp) ?? 0}
+                            y={(d) => yScale(d.value) ?? 0}
+                            y0={thresholdY}
+                            yScale={yScale}
+                            fill="url(#area-gradient-profit)"
+                            curve={curveLinear}
+                            clipPath={`url(#threshold-clip-above-${modelId})`}
+                          />
+                          
+                          {/* Red area for loss */}
+                          <AreaClosed
+                            data={dataWithInitial}
+                            x={(d) => xScale(d.timestamp) ?? 0}
+                            y={(d) => yScale(d.value) ?? 0}
+                            y0={thresholdY}
+                            yScale={yScale}
+                            fill="url(#area-gradient-loss)"
+                            curve={curveLinear}
+                            clipPath={`url(#threshold-clip-below-${modelId})`}
+                          />
+                          
+                          {/* Threshold line at initial balance */}
+                          <line
+                            x1="0"
+                            y1={thresholdY}
+                            x2={innerWidth}
+                            y2={thresholdY}
+                            stroke="#666666"
+                            strokeWidth="1"
+                            strokeDasharray="2,2"
+                            opacity="0.5"
+                          />
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
+                
                 <LinePath
-                  data={modelData}
+                  data={(() => {
+                    // 如果选中且显示美元，添加初始点
+                    if (selectedModel === modelId && displayMode === '$' && modelData.length > 0) {
+                      const initialBalance = 10000;
+                      const minTimestamp = Math.min(...modelData.map(d => d.timestamp));
+                      return [
+                        { timestamp: minTimestamp, value: initialBalance, modelId },
+                        ...modelData
+                      ];
+                    }
+                    return modelData;
+                  })()}
                   x={(d) => xScale(d.timestamp) ?? 0}
                   y={(d) => yScale(d.value) ?? 0}
                   stroke={modelColor}
@@ -382,18 +488,35 @@ function Chart({
                   onMouseLeave={() => setHoveredModelId(null)}
                 />
                 
-                {/* 线条末端的模型图标 */}
-                <use
-                  href={`#circle-with-icon-${modelId}`}
-                  x={lastX}
-                  y={lastY}
-                  opacity={shouldDim ? 0.3 : 1}
-                  style={{ transition: 'opacity 0.2s ease-in-out' }}
-                />
+                {/* 涟漪效果 - 每3秒触发一次 */}
+                <g 
+                  key={`${modelId}-pulse-${pulseKey}`}
+                  transform={`translate(${lastX + circleRadius}, ${lastY})`}
+                >
+                  <circle
+                    cx="0"
+                    cy="0"
+                    r={circleRadius + 8}
+                    fill={modelColor}
+                    opacity="0.4"
+                    style={{
+                      animation: 'pulse-out 1s ease-out forwards',
+                      animationFillMode: 'forwards'
+                    }}
+                  />
+                </g>
+                
+                {/* 线条末端的模型图标 - 向右偏移半径，使折线连接到左边缘 */}
+                <g transform={`translate(${lastX + circleRadius}, ${lastY})`}>
+                  <use
+                    href={`#circle-with-icon-${modelId}`}
+                    opacity={shouldDim ? 0.3 : 1}
+                  />
+                </g>
                 
                 {/* 数值标签 - 紧贴图标右侧，使用动态数字 */}
                 {!modelId.includes('buynhold') && (
-                  <g transform={`translate(${lastX + 20}, ${lastY - 9})`}>
+                  <g transform={`translate(${lastX + circleRadius + 20}, ${lastY - 9})`}>
                     <rect
                       x="0"
                       y="0"
@@ -442,10 +565,14 @@ function Chart({
           <AxisBottom
             top={innerHeight}
             scale={xScale}
+            tickValues={xTickValues}
             stroke="rgba(0, 0, 0, 0.4)"
             strokeWidth={1.5}
             tickStroke="rgba(0, 0, 0, 0.6)"
             tickLength={8}
+            hideAxisLine={false}
+            hideTicks={false}
+            hideZero={false}
             tickLabelProps={() => ({
               fill: 'rgba(0, 0, 0, 0.8)',
               fontSize: width < 640 ? 10 : 12,
@@ -473,6 +600,9 @@ function Chart({
             strokeWidth={1.5}
             tickStroke="rgba(0, 0, 0, 0.6)"
             tickLength={8}
+            hideAxisLine={false}
+            hideTicks={false}
+            hideZero={false}
             numTicks={width < 640 ? 3 : 6}
             tickLabelProps={() => ({
               fill: 'rgba(0, 0, 0, 0.8)',

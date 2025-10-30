@@ -78,12 +78,12 @@ async function startServer() {
   try {
     // 启动数据收集服务
     console.log('[Server] Starting data collector...');
-    await dataCollector.start(15000); // 15秒快照
+    await dataCollector.start(3000); // 3秒快照
 
     // 启动HTTP服务器
     app.listen(PORT, () => {
       console.log(`[Server] ✓ Backend server running on http://localhost:${PORT}`);
-      console.log(`[Server] ✓ Data collector running (snapshot: 15s, price: 3s)`);
+      console.log(`[Server] ✓ Data collector running (snapshot: 3s, price: 3s)`);
       console.log(`[Server] ✓ API endpoints available at http://localhost:${PORT}/api`);
     });
   } catch (error) {

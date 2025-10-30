@@ -176,7 +176,9 @@ export class MCPClient {
     include_history?: boolean;
     include_performance?: boolean;
   }): Promise<any> {
-    return this.callTool('get_account_state', params);
+    const result = await this.callTool('get_account_state', params);
+    console.log('[MCP-CLIENT] getAccountState result:', JSON.stringify(result, null, 2));
+    return result;
   }
 
   /**

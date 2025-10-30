@@ -16,7 +16,7 @@ export default async function handler(
     
     const apiUrl = dataSource === 'custom' 
       ? `${customApiUrl}/api/account-totals`
-      : 'https://nof1.ai/api/account-totals?lastHourlyMarker=273';
+      : 'https://nof1.ai/api/account-totals?lastHourlyMarker=295';
     
     console.log(`[account-totals] Using ${dataSource} API: ${apiUrl}`);
     

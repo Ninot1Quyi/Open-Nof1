@@ -49,6 +49,7 @@ TRUNCATE TABLE account_snapshots CASCADE;
 TRUNCATE TABLE positions CASCADE;
 TRUNCATE TABLE completed_trades CASCADE;
 TRUNCATE TABLE agent_conversations CASCADE;
+TRUNCATE TABLE btc_buyhold_baseline CASCADE;
 
 -- 重置序列（如果有）
 -- ALTER SEQUENCE IF EXISTS xxx_id_seq RESTART WITH 1;
@@ -64,23 +65,83 @@ fi
 
 echo ""
 
-# 重置 nof1 (MCP) 数据库
-echo -e "${YELLOW}[2/2] 重置 nof1 (MCP) 数据库...${NC}"
+# 重置 nof1 (MCP) 数据库 - 完全删除并重建
+echo -e "${YELLOW}[2/2] 删除并重建 nof1 (MCP) 数据库...${NC}"
 
+# 断开所有连接到 nof1 数据库的会话
+psql -d postgres <<EOF
+-- 终止所有连接到 nof1 数据库的会话
+SELECT pg_terminate_backend(pg_stat_activity.pid)
+FROM pg_stat_activity
+WHERE pg_stat_activity.datname = 'nof1'
+  AND pid <> pg_backend_pid();
+EOF
+
+# 删除并重建 nof1 数据库
+psql -d postgres <<EOF
+-- 删除数据库
+DROP DATABASE IF EXISTS nof1;
+
+-- 重新创建数据库
+CREATE DATABASE nof1 OWNER "OpenNof1";
+
+EOF
+
+# 连接到 nof1 数据库并创建表结构
 psql -d nof1 <<EOF
--- 删除所有开仓记录
-DELETE FROM mcp_trades WHERE status = 'open';
+-- 授予用户在 public schema 上的权限
+GRANT ALL ON SCHEMA public TO "OpenNof1";
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "OpenNof1";
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "OpenNof1";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "OpenNof1";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "OpenNof1";
 
--- 删除所有已完成交易（可选，如果想保留历史可以注释掉）
-DELETE FROM mcp_trades WHERE status = 'closed';
+-- ============================================
+-- MCP 数据库表结构
+-- ============================================
+-- 注意：每个 Agent 会创建自己的表，格式为 mcp_trades_{agent_name} 和 mcp_snapshots_{agent_name}
+-- 这里创建一个示例表结构供参考
 
--- 删除快照数据（如果有）
-DELETE FROM mcp_snapshots;
+-- 示例：创建通用的 MCP 交易记录表模板
+-- 实际使用时，每个 Agent 会创建类似的表，但表名不同
+COMMENT ON SCHEMA public IS 'MCP 数据库 - 每个 Agent 会创建独立的 trades 和 snapshots 表';
+
+-- 表结构说明（实际表名会根据 Agent 名称动态生成）：
+-- 
+-- mcp_trades_{agent_name} 表结构：
+--   - position_id TEXT PRIMARY KEY
+--   - coin TEXT NOT NULL
+--   - side TEXT NOT NULL
+--   - entry_price NUMERIC NOT NULL
+--   - quantity NUMERIC NOT NULL
+--   - leverage INTEGER NOT NULL
+--   - entry_time BIGINT NOT NULL
+--   - exit_time BIGINT
+--   - exit_price NUMERIC
+--   - margin NUMERIC NOT NULL
+--   - fees NUMERIC DEFAULT 0
+--   - realized_pnl NUMERIC
+--   - exit_plan JSONB
+--   - confidence NUMERIC
+--   - status TEXT NOT NULL DEFAULT 'open'
+--   - sl_oid TEXT
+--   - tp_oid TEXT
+--   - created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+--   - updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+--
+-- mcp_snapshots_{agent_name} 表结构：
+--   - id SERIAL PRIMARY KEY
+--   - timestamp TIMESTAMP NOT NULL
+--   - account_value NUMERIC NOT NULL
+--   - total_pnl NUMERIC NOT NULL
+--   - win_rate NUMERIC
+--   - total_trades INTEGER
+--   - created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 
 EOF
 
 if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✓ nof1 数据库已重置${NC}"
+    echo -e "${GREEN}✓ nof1 数据库已完全删除并重建${NC}"
 else
     echo -e "${RED}✗ nof1 数据库重置失败${NC}"
     exit 1

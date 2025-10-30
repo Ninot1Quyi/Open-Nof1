@@ -68,47 +68,9 @@ export default function TopBar({ accountTotals }: TopBarProps) {
 
   // 根据实时币价计算账户总价值
   const calculateAccountValue = (account: any) => {
-    if (!account) {
-      return 0
-    }
-
-    // 如果没有实时价格数据，直接返回 dollar_equity
-    if (!cryptoPrices || !cryptoPrices.prices) {
-      return account.dollar_equity || 0
-    }
-
-    // 如果没有持仓，直接返回 dollar_equity
-    if (!account.positions || Object.keys(account.positions).length === 0) {
-      return account.dollar_equity || 0
-    }
-
-    // 计算实时未实现盈亏
-    let realtimeUnrealizedPnl = 0
-    
-    try {
-      Object.entries(account.positions).forEach(([symbol, position]: [string, any]) => {
-        // 安全地访问价格数据
-        const priceData = cryptoPrices.prices?.[symbol]
-        const currentPrice = priceData?.price
-        
-        if (currentPrice && position?.entry_price && position?.quantity) {
-          // 计算未实现盈亏：(当前价格 - 入场价格) * 数量
-          const priceDiff = currentPrice - position.entry_price
-          const pnl = priceDiff * position.quantity
-          realtimeUnrealizedPnl += pnl
-        }
-      })
-    } catch (error) {
-      console.error('Error calculating account value:', error)
-      return account.dollar_equity || 0
-    }
-
-    // 实时账户价值 = dollar_equity - total_unrealized_pnl + 实时未实现盈亏
-    // dollar_equity 包含了旧的未实现盈亏，需要减去后加上新的
-    const dollarEquity = account.dollar_equity || 0
-    const oldUnrealizedPnl = account.total_unrealized_pnl || 0
-    
-    return dollarEquity - oldUnrealizedPnl + realtimeUnrealizedPnl
+    // 直接使用后端返回的 dollar_equity
+    // 后端已经从交易所 API 获取了最新的总权益（包含未实现盈亏）
+    return account?.dollar_equity || 0
   }
 
   // 计算最高和最低表现的模型

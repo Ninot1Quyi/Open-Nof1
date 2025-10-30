@@ -68,6 +68,8 @@ export default function ModelCard({
               fontVariantNumeric: 'tabular-nums',
               display: 'inline-block',
             }}
+            animated
+            trend={percentChange >= 0 ? 1 : -1}
           />
         </div>
       </div>

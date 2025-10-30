@@ -19,7 +19,7 @@ dotenv.config({ path: path.join(projectRoot, '.env') });
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'ai_trading',
+  database: process.env.DB_NAME || 'nof1',
   user: process.env.DB_USER || 'OpenNof1',
   password: process.env.DB_PASSWORD || '',
   max: 20,
@@ -127,6 +127,7 @@ export async function getAccountSnapshotsByModel(modelId: string, limit?: number
 export async function savePosition(data: {
   model_id: string;
   symbol: string;
+  side: string;
   snapshot_id: number;
   entry_price: number;
   current_price: number;
@@ -145,13 +146,13 @@ export async function savePosition(data: {
   try {
     const result = await client.query(
       `INSERT INTO positions (
-        model_id, symbol, snapshot_id, entry_price, current_price, quantity,
+        model_id, symbol, side, snapshot_id, entry_price, current_price, quantity,
         leverage, unrealized_pnl, confidence, risk_usd, notional_usd,
         profit_target, stop_loss, invalidation_condition, timestamp
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING id`,
       [
-        data.model_id, data.symbol, data.snapshot_id, data.entry_price, data.current_price,
+        data.model_id, data.symbol, data.side, data.snapshot_id, data.entry_price, data.current_price,
         data.quantity, data.leverage, data.unrealized_pnl, data.confidence, data.risk_usd,
         data.notional_usd, data.profit_target, data.stop_loss, data.invalidation_condition,
         data.timestamp
@@ -375,6 +376,48 @@ export async function getConversationsByModel(modelId: string, limit?: number) {
 }
 
 // ==================== 工具函数 ====================
+
+// ==================== BTC Buy&Hold 基准策略相关 ====================
+
+/**
+ * 获取或初始化 BTC Buy&Hold 基准数据
+ * @param initialBalance 初始资金
+ * @param currentBtcPrice 当前 BTC 价格
+ * @returns 初始 BTC 数量
+ */
+export async function getOrInitBtcBuyHoldBaseline(
+  initialBalance: number,
+  currentBtcPrice: number
+): Promise<number> {
+  const client = await pool.connect();
+  try {
+    // 检查是否已有记录
+    const result = await client.query(
+      'SELECT initial_btc_quantity FROM btc_buyhold_baseline WHERE initial_balance = $1',
+      [initialBalance]
+    );
+
+    if (result.rows.length > 0) {
+      // 已有记录，返回已保存的 BTC 数量
+      return parseFloat(result.rows[0].initial_btc_quantity);
+    }
+
+    // 没有记录，计算并保存初始 BTC 数量
+    const initialBtcQuantity = initialBalance / currentBtcPrice;
+    
+    await client.query(
+      `INSERT INTO btc_buyhold_baseline (initial_balance, initial_btc_quantity, initial_btc_price)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (initial_balance) DO NOTHING`,
+      [initialBalance, initialBtcQuantity, currentBtcPrice]
+    );
+
+    console.log(`[DB] ✓ Initialized BTC Buy&Hold baseline: ${initialBtcQuantity.toFixed(8)} BTC @ $${currentBtcPrice.toFixed(2)}`);
+    return initialBtcQuantity;
+  } finally {
+    client.release();
+  }
+}
 
 /**
  * 测试数据库连接

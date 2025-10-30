@@ -73,9 +73,10 @@ class Prompter {
   // 允许交易的币种白名单（OKX 沙盒环境限制）
   // 只包含主流币种，避免借币额度不足的问题
   private coins = ['BTC', 'ETH', 'SOL','BNB'];
-  private mcpClient = getMCPClient();
+  private mcpClient: ReturnType<typeof getMCPClient>;
 
-  constructor() {
+  constructor(agentName: string = 'default') {
+    this.mcpClient = getMCPClient(agentName);
     // 读取模板文件
     // 如果在build目录，需要向上一级找模板
     const templateDir = __dirname.endsWith('build') 

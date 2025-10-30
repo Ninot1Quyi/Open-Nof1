@@ -28,11 +28,23 @@ router.get('/conversations', async (req: Request, res: Response) => {
       // 处理 cot_trace
       let cotTrace = conv.cot_trace;
       if (cotTrace) {
-        // 如果是对象，提取 raw_response
-        if (typeof cotTrace === 'object' && cotTrace.raw_response) {
-          cotTrace = cotTrace.raw_response;
-        } else if (typeof cotTrace !== 'string') {
-          cotTrace = JSON.stringify(cotTrace, null, 2);
+        // 如果是字符串类型的 JSON，尝试解析
+        if (typeof cotTrace === 'string') {
+          try {
+            // 尝试解析 JSON 字符串（新格式：直接存储 reasoning 文本）
+            const parsed = JSON.parse(cotTrace);
+            cotTrace = typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
+          } catch (e) {
+            // 如果解析失败，说明已经是纯文本，直接使用
+            // 这种情况不应该发生，因为数据库字段是 jsonb
+          }
+        } else if (typeof cotTrace === 'object') {
+          // 如果是对象，提取 raw_response（旧格式）
+          if (cotTrace.raw_response) {
+            cotTrace = cotTrace.raw_response;
+          } else {
+            cotTrace = JSON.stringify(cotTrace, null, 2);
+          }
         }
       }
 

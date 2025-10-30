@@ -47,7 +47,7 @@ export class DataCollector {
   /**
    * 启动数据收集服务
    */
-  async start(snapshotIntervalMs: number = 15000): Promise<void> {
+  async start(snapshotIntervalMs: number = 3000): Promise<void> {
     console.log('[DataCollector] Starting data collection service...');
 
     // 测试数据库连接
@@ -196,21 +196,25 @@ export class DataCollector {
 
         // 保存仓位信息
         for (const position of accountState.positions) {
+          // 从 MCP 数据库获取 exit_plan（通过 symbol + side 查询）
+          const exitPlanData = await this.getExitPlanFromMCP(modelId, position.symbol, position.side);
+          
           await db.savePosition({
             model_id: modelId,
             symbol: position.symbol,
+            side: position.side,
             snapshot_id: snapshotId,
             entry_price: position.entryPrice,
             current_price: position.currentPrice,
-            quantity: position.contracts,
+            quantity: position.quantity,  // 实际币数量
             leverage: position.leverage,
             unrealized_pnl: position.unrealizedPnl,
-            confidence: undefined,
-            risk_usd: undefined,
-            notional_usd: position.contracts * position.currentPrice,
-            profit_target: undefined,
-            stop_loss: undefined,
-            invalidation_condition: undefined,
+            confidence: exitPlanData?.confidence,
+            risk_usd: exitPlanData?.risk_usd,
+            notional_usd: Math.abs(position.quantity * position.currentPrice),  // notional 使用绝对值
+            profit_target: exitPlanData?.profit_target,
+            stop_loss: exitPlanData?.stop_loss,
+            invalidation_condition: exitPlanData?.invalidation_condition,
             timestamp,
           });
         }
@@ -221,81 +225,142 @@ export class DataCollector {
       }
     }
 
-    // 同步已完成的交易
-    await this.syncCompletedTrades();
+    console.log('[DataCollector] DEBUG: Finished collecting snapshots, now syncing trades...');
+    // 同步已完成的交易（从交易所 API 获取）
+    try {
+      await this.syncCompletedTrades();
+    } catch (error) {
+      console.error('[DataCollector] Error in syncCompletedTrades:', error);
+    }
+    console.log('[DataCollector] DEBUG: Finished syncing trades');
   }
 
   /**
-   * 从 MCP 数据库同步已完成的交易
+   * 从交易所 API 同步已完成的交易（最近的订单历史）
    */
   private async syncCompletedTrades(): Promise<void> {
     try {
-      const client = await mcpPool.connect();
-      try {
-        // 查询所有已完成的交易
-        const result = await client.query(`
-          SELECT 
-            position_id,
-            coin,
-            side,
-            entry_price,
-            quantity,
-            leverage,
-            entry_time,
-            exit_time,
-            exit_price,
-            realized_pnl,
-            fees
-          FROM mcp_trades
-          WHERE status = 'closed'
-          AND exit_time IS NOT NULL
-          ORDER BY exit_time DESC
-        `);
-
-        let syncedCount = 0;
-        for (const trade of result.rows) {
-          // MCP 数据库中没有 model_id 字段
-          // 暂时将所有历史交易归属到第一个启用的 Agent
-          const modelId = Array.from(this.exchangeClients.keys())[0];
-          if (!modelId) {
-            continue;
-          }
-
-          try {
-            // 保存到数据库（如果已存在会被忽略，因为 id 是主键）
-            await db.saveCompletedTrade({
-              id: trade.position_id,
-              model_id: modelId,
-              symbol: trade.coin,
-              side: trade.side,
-              quantity: parseFloat(trade.quantity),
-              entry_price: parseFloat(trade.entry_price),
-              exit_price: parseFloat(trade.exit_price),
-              leverage: trade.leverage,
-              realized_net_pnl: parseFloat(trade.realized_pnl || '0'),
-              entry_time: Math.floor(new Date(trade.entry_time).getTime() / 1000),
-              exit_time: Math.floor(new Date(trade.exit_time).getTime() / 1000),
-              entry_human_time: trade.entry_time,
-              exit_human_time: trade.exit_time,
-            });
-
-            syncedCount++;
-          } catch (error: any) {
-            // 忽略重复键错误
-            if (error.code !== '23505') {
-              console.error(`[DataCollector] Error saving trade ${trade.position_id}:`, error);
+      console.log('[DataCollector] Starting to sync completed trades from exchange...');
+      // 遍历所有 Agent 的交易所客户端
+      for (const [modelId, exchangeClient] of this.exchangeClients.entries()) {
+        try {
+          // 获取最近的已完成订单（最多100条）
+          const orders = await exchangeClient.getExchange().fetchClosedOrders(undefined, undefined, 100);
+          console.log(`[DataCollector] Fetched ${orders.length} closed orders for ${modelId}`);
+          
+          let syncedCount = 0;
+          for (const order of orders) {
+            // 只处理已完成的订单
+            if (order.status !== 'closed' || !order.filled) continue;
+            
+            const symbol = order.symbol?.split('/')[0] || '';
+            const side = order.side === 'buy' ? 'long' : 'short';
+            
+            // 计算实际盈亏（需要找到对应的平仓订单）
+            // 这里简化处理，使用订单的 cost 和 fee
+            const realizedPnl = order.cost ? parseFloat(String(order.cost)) : 0;
+            
+            try {
+              await db.saveCompletedTrade({
+                id: order.id || `${modelId}_${symbol}_${order.timestamp}`,
+                model_id: modelId,
+                symbol: symbol,
+                side: side,
+                quantity: order.filled || 0,
+                entry_price: order.price || 0,
+                exit_price: order.average || order.price || 0,
+                leverage: 1, // 订单信息中没有杠杆，默认1
+                realized_net_pnl: realizedPnl,
+                entry_time: order.timestamp ? Math.floor(order.timestamp / 1000) : Math.floor(Date.now() / 1000),
+                exit_time: order.timestamp ? Math.floor(order.timestamp / 1000) : Math.floor(Date.now() / 1000),
+                entry_human_time: order.datetime || new Date(order.timestamp || Date.now()).toISOString(),
+                exit_human_time: order.datetime || new Date(order.timestamp || Date.now()).toISOString(),
+              });
+              
+              syncedCount++;
+            } catch (error: any) {
+              // 忽略重复键错误
+              if (error.code !== '23505') {
+                console.error(`[DataCollector] Error saving order ${order.id}:`, error);
+              }
             }
           }
+          
+          if (syncedCount > 0) {
+            console.log(`[DataCollector] ✓ Synced ${syncedCount} completed orders for ${modelId}`);
+          }
+        } catch (error) {
+          console.error(`[DataCollector] Error fetching orders for ${modelId}:`, error);
         }
+      }
+    } catch (error) {
+      console.error('[DataCollector] Error syncing completed trades:', error);
+    }
+  }
 
-        if (syncedCount > 0) {
-          console.log(`[DataCollector] ✓ Synced ${syncedCount} completed trades from MCP database`);
+  /**
+   * 从 MCP 数据库获取 exit_plan（通过 symbol + side 查询）
+   */
+  private async getExitPlanFromMCP(modelId: string, symbol: string, side: 'long' | 'short'): Promise<{
+    confidence?: number;
+    risk_usd?: number;
+    profit_target?: number;
+    stop_loss?: number;
+    invalidation_condition?: string;
+  } | null> {
+    try {
+      const client = await mcpPool.connect();
+      try {
+        // 将 modelId 转换为安全的表名
+        const safeName = modelId.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+        const tableName = `mcp_trades_${safeName}`;
+        
+        // 检查表是否存在
+        const tableExists = await client.query(`
+          SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_name = $1
+          )
+        `, [tableName]);
+        
+        if (!tableExists.rows[0].exists) {
+          return null;
         }
+        
+        // 查询该币种的 exit_plan（通过 symbol + side 匹配）
+        const result = await client.query(`
+          SELECT exit_plan, confidence
+          FROM ${tableName}
+          WHERE coin = $1 AND side = $2
+          LIMIT 1
+        `, [symbol, side]);
+        
+        if (result.rows.length === 0) {
+          return null;
+        }
+        
+        const row = result.rows[0];
+        const exitPlan = row.exit_plan;
+        
+        if (!exitPlan) {
+          return {
+            confidence: row.confidence ? parseFloat(row.confidence) : undefined,
+          };
+        }
+        
+        return {
+          confidence: row.confidence ? parseFloat(row.confidence) : undefined,
+          risk_usd: exitPlan.risk_usd ? parseFloat(exitPlan.risk_usd) : undefined,
+          profit_target: exitPlan.profit_target ? parseFloat(exitPlan.profit_target) : undefined,
+          stop_loss: exitPlan.stop_loss ? parseFloat(exitPlan.stop_loss) : undefined,
+          invalidation_condition: exitPlan.invalidation || exitPlan.invalidation_condition,
+        };
       } finally {
         client.release();
       }
     } catch (error) {
-      console.error('[DataCollector] Error syncing completed trades:', error);
+      console.error(`[DataCollector] Error fetching exit plan from MCP for ${modelId}/${symbol}/${side}:`, error);
+      return null;
     }
   }
 

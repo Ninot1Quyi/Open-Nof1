@@ -311,7 +311,7 @@ export default function RightPanel() {
             setConversations(data.conversations)
           }
         })
-    }, 10000)
+    }, 3000)
 
     return () => clearInterval(interval)
   }, [])
@@ -405,26 +405,23 @@ export default function RightPanel() {
 
   // 计算实时的 NOTIONAL 和 UNREAL P&L
   const calculateRealtimePositionData = (symbol: string, position: any) => {
-    if (!cryptoPrices || !cryptoPrices[symbol]) {
-      return {
-        notional: position.notional_usd || 0,
-        unrealizedPnl: position.unrealized_pnl || 0
-      }
+    // 直接使用后端返回的盈亏数据，因为后端已经从交易所 API 获取了准确值
+    // 交易所的计算考虑了手续费、资金费率等因素，比前端自己计算更准确
+    const unrealizedPnl = position.unrealized_pnl || 0
+    
+    // 如果有实时价格，更新 notional；否则使用后端返回的值
+    let notional = position.notional_usd || 0
+    if (cryptoPrices && cryptoPrices[symbol]) {
+      const currentPrice = typeof cryptoPrices[symbol] === 'number' 
+        ? cryptoPrices[symbol] 
+        : (cryptoPrices[symbol] as any).price || 0
+      const quantity = position.quantity || 0
+      notional = Math.abs(currentPrice * quantity)
     }
-
-    const currentPrice = cryptoPrices[symbol].price
-    const quantity = Math.abs(position.quantity || 0)
-    
-    // NOTIONAL = 当前价格 × 数量
-    const notional = currentPrice * quantity
-    
-    // UNREAL P&L = (当前价格 - 入场价格) × 数量
-    const priceDiff = currentPrice - (position.entry_price || 0)
-    const unrealizedPnl = priceDiff * (position.quantity || 0)
     
     return {
-      notional,
-      unrealizedPnl
+      notional: isNaN(notional) ? 0 : notional,
+      unrealizedPnl: isNaN(unrealizedPnl) ? 0 : unrealizedPnl
     }
   }
 
@@ -779,7 +776,7 @@ export default function RightPanel() {
                                 </span>
                                 <span className="font-mono text-sm text-gray-500">USER_PROMPT</span>
                               </button>
-                              <div className={`ml-4 px-2 overflow-hidden transition-all duration-200 ${expandedSections.has(`${conversationId}-prompt`) ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                              <div className="ml-4 px-2" style={{ display: expandedSections.has(`${conversationId}-prompt`) ? 'block' : 'none' }}>
                                 <div className="rounded border border-border bg-surface-elevated p-3 text-black text-[10px] prose prose-sm max-w-none">
                                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {conversation?.user_prompt || `Current market data and account information for ${modelName}\nAccount Value: $${account.dollar_equity?.toFixed(2)}\nTotal Unrealized P&L: $${account.total_unrealized_pnl?.toFixed(2)}\nActive Positions: ${positionCount}`}
@@ -802,7 +799,7 @@ export default function RightPanel() {
                                 </span>
                                 <span className="font-mono text-sm text-gray-500">CHAIN_OF_THOUGHT</span>
                               </button>
-                              <div className={`ml-4 px-2 overflow-hidden transition-all duration-200 ${expandedSections.has(`${conversationId}-thought`) ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                              <div className="ml-4 px-2" style={{ display: expandedSections.has(`${conversationId}-thought`) ? 'block' : 'none' }}>
                                 <div className="rounded border border-border bg-surface-elevated p-3 text-black text-[10px] prose prose-sm max-w-none">
                                   {conversation?.cot_trace ? (
                                     typeof conversation.cot_trace === 'string' ? (
@@ -849,7 +846,7 @@ export default function RightPanel() {
                                 </span>
                                 <span className="font-mono text-sm text-gray-500">TRADING_DECISIONS</span>
                               </button>
-                              <div className={`ml-4 px-2 overflow-hidden transition-all duration-200 ${expandedSections.has(`${conversationId}-decisions`) ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                              <div className="ml-4 px-2" style={{ display: expandedSections.has(`${conversationId}-decisions`) ? 'block' : 'none' }}>
                                 <div className="grid grid-cols-1 gap-3">
                                     {conversation?.llm_response ? (
                                       Object.entries(conversation.llm_response).map(([symbol, decision]: [string, any]) => (
@@ -1033,8 +1030,8 @@ export default function RightPanel() {
                           return (
                             <div key={symbol}>
                               <div className="grid grid-cols-6 gap-1 text-xs relative">
-                                <div className={pos.quantity > 0 ? 'terminal-positive' : 'terminal-negative'}>
-                                  {pos.quantity > 0 ? 'LONG' : 'SHORT'}
+                                <div className={pos.quantity >= 0 ? 'terminal-positive' : 'terminal-negative'}>
+                                  {pos.quantity >= 0 ? 'LONG' : 'SHORT'}
                                 </div>
                                 <div className="flex items-center">
                                   <img src={`/coins/${symbol.toLowerCase()}.svg`} alt={symbol} className="w-4 h-4 mr-1" />

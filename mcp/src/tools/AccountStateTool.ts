@@ -32,11 +32,26 @@ export class AccountStateTool {
 
     // Get balance
     const balance = await this.exchange.getBalance();
-    // console.error('[DEBUG-BALANCE] Raw balance from exchange:', JSON.stringify(balance, null, 2));
-    // console.error('[DEBUG-BALANCE] balance.USDT:', balance.USDT);
-    // console.error('[DEBUG-BALANCE] balance keys:', Object.keys(balance));
-    const usdtBalance = balance.USDT || { free: 0, used: 0, total: 0 };
-    // console.error('[DEBUG-BALANCE] usdtBalance:', usdtBalance);
+    
+    // OKX 的余额结构：balance.info.data[0].details 中包含各币种的详细信息
+    const accountData = balance.info?.data?.[0];
+    const usdtDetail = accountData?.details?.find((d: any) => d.ccy === 'USDT');
+    
+    // 使用 USDT 的 eq（总权益，包含保证金和未实现盈亏）
+    const usdtBalance = {
+      free: parseFloat(usdtDetail?.availBal || balance.USDT?.free || '0'),
+      used: parseFloat(usdtDetail?.frozenBal || balance.USDT?.used || '0'),
+      total: parseFloat(usdtDetail?.eq || balance.USDT?.total || '0')
+    };
+    
+    console.log('[AccountState] USDT Balance:', {
+      free: usdtBalance.free,
+      used: usdtBalance.used,
+      total: usdtBalance.total,
+      'usdtDetail.eq': usdtDetail?.eq,
+      'usdtDetail.availBal': usdtDetail?.availBal,
+      'usdtDetail.frozenBal': usdtDetail?.frozenBal
+    });
 
     // Step 1: 从交易所获取实时仓位数据
     const exchangePositions = include_positions
@@ -47,8 +62,16 @@ export class AccountStateTool {
 
     // Step 2: 同步交易所数据到数据库
     // 获取数据库中所有开仓记录
-    const allTrades = await this.db.getAllTrades();
-    const openTrades = allTrades.filter(t => t.status === 'open');
+    // 注意：由于表结构简化，这里可能会失败，我们捕获错误并继续
+    let allTrades: any[] = [];
+    let openTrades: any[] = [];
+    try {
+      allTrades = await this.db.getAllTrades();
+      openTrades = allTrades.filter(t => t.status === 'open');
+    } catch (error) {
+      console.log('[AccountState] Warning: Could not fetch trades from DB (table structure simplified):', error instanceof Error ? error.message : error);
+      // 继续执行，不依赖数据库历史
+    }
     
     // 创建交易所仓位的映射 (coin + side -> position)
     const exchangePositionMap = new Map<string, any>();
@@ -63,8 +86,31 @@ export class AccountStateTool {
     for (const trade of openTrades) {
       const key = `${trade.coin}_${trade.side}`;
       if (!exchangePositionMap.has(key)) {
-        // this.log(`Position ${trade.coin} ${trade.side} no longer exists on exchange, marking as closed`);
-        await this.db.updateTradeStatus(trade.position_id, 'closed');
+        // 仓位已关闭，获取当前市场价格作为退出价格
+        try {
+          const symbol = `${trade.coin}/USDT:USDT`;
+          const ticker = await this.exchange.getExchange().fetchTicker(symbol);
+          const exitPrice = ticker.last || ticker.close || trade.entry_price;
+          
+          // 计算实际盈亏
+          const priceDiff = exitPrice - trade.entry_price;
+          const multiplier = trade.side === 'long' ? 1 : -1;
+          const realizedPnl = priceDiff * multiplier * trade.quantity;
+          
+          // 更新交易记录，包含实际退出价格和时间
+          await this.db.updateTrade(trade.position_id, {
+            exit_price: exitPrice,
+            exit_time: new Date(),
+            realized_pnl: realizedPnl,
+            status: 'closed',
+          });
+          
+          console.log(`[AccountState] Position ${trade.coin} ${trade.side} closed at ${exitPrice}, PnL: ${realizedPnl.toFixed(2)}`);
+        } catch (error) {
+          console.error(`[AccountState] Error getting exit price for ${trade.coin}:`, error);
+          // 如果获取价格失败，至少标记为已关闭
+          await this.db.updateTradeStatus(trade.position_id, 'closed');
+        }
       }
     }
     
@@ -81,6 +127,16 @@ export class AccountStateTool {
       const leverage = parseFloat(String(pos.leverage || '1'));
       const side = pos.side === 'long' ? 'long' : 'short';
       const coin = pos.symbol?.split('/')[0] || '';
+
+      // Convert contracts to actual quantity based on contract size
+      // OKX contract specifications:
+      // - BTC: 0.01 BTC per contract
+      // - ETH: 0.1 ETH per contract  
+      // - SOL: 1 SOL per contract
+      // - BNB: 0.01 BNB per contract
+      // - Most altcoins: varies, use contractSize from API
+      const contractSize = parseFloat(String(pos.contractSize || '1'));
+      const actualQuantity = contracts * contractSize;
 
       // Use unrealized PnL from exchange API (more accurate)
       // OKX API already calculates this correctly considering contract size, fees, etc.
@@ -111,7 +167,7 @@ export class AccountStateTool {
         side,
         entry_price: entryPrice,
         entry_time: pos.timestamp ? new Date(pos.timestamp).toISOString() : new Date().toISOString(),
-        quantity: contracts,
+        quantity: actualQuantity,  // Use actual quantity instead of contracts
         leverage,
         liquidation_price: parseFloat(String(pos.liquidationPrice || '0')),
         margin: marginInUsdt,
@@ -167,9 +223,16 @@ export class AccountStateTool {
     const totalPnl = accountValue - initialBalance;
     
     // 从数据库获取历史统计（用于性能分析）
-    const dbTotalPnl = await this.db.calculateTotalPnL();
-    const totalFees = await this.db.calculateTotalFees();
-    const netRealized = dbTotalPnl - totalFees;
+    let dbTotalPnl = 0;
+    let totalFees = 0;
+    let netRealized = 0;
+    try {
+      dbTotalPnl = await this.db.calculateTotalPnL();
+      totalFees = await this.db.calculateTotalFees();
+      netRealized = dbTotalPnl - totalFees;
+    } catch (error) {
+      console.log('[AccountState] Warning: Could not calculate PnL from DB:', error instanceof Error ? error.message : error);
+    }
 
     // Performance metrics
     let sharpeRatio: number | undefined;
@@ -177,9 +240,13 @@ export class AccountStateTool {
     let tradeCount = 0;
 
     if (include_performance) {
-      sharpeRatio = await this.db.calculateSharpeRatio();
-      winRate = await this.db.calculateWinRate();
-      tradeCount = allTrades.length;
+      try {
+        sharpeRatio = await this.db.calculateSharpeRatio();
+        winRate = await this.db.calculateWinRate();
+        tradeCount = allTrades.length;
+      } catch (error) {
+        console.log('[AccountState] Warning: Could not calculate performance metrics:', error instanceof Error ? error.message : error);
+      }
     }
 
     return {
