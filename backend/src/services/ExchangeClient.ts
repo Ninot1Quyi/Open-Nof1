@@ -230,37 +230,52 @@ export class ExchangeClient {
     exitTime: number;
   }>> {
     try {
-      // 使用 CCXT 的 fetchPositionsHistory 方法
-      // 注意：不是所有交易所都支持这个方法，OKX 支持
-      const closedPositions = await this.exchange.fetchPositionsHistory(undefined, undefined, limit);
+      // 直接使用 OKX 原生 API 获取历史仓位
+      // https://www.okx.com/docs-v5/zh/#trading-account-rest-api-get-positions-history
+      const response = await this.exchange.privateGetAccountPositionsHistory({
+        instType: 'SWAP',
+        limit: limit.toString()
+      });
+      
+      const closedPositions = response.data || [];
+      console.log(`[ExchangeClient] Fetched ${closedPositions.length} closed positions from OKX`);
+      
+      if (closedPositions.length > 0) {
+        console.log('[ExchangeClient] First closed position sample:', JSON.stringify(closedPositions[0], null, 2));
+      }
       
       return closedPositions
-        .filter((pos: any) => {
-          // 只返回已平仓的仓位
-          // OKX 的已平仓位：pos.info.closeAvgPx 存在表示已平仓
-          return pos.info?.closeAvgPx || pos.info?.pnl;
-        })
         .map((pos: any) => {
-          const symbol = pos.symbol?.split('/')[0] || '';
+          const symbol = pos.instId?.split('-')[0] || ''; // OKX format: BTC-USDT-SWAP
           
-          // 对于已平仓位，使用 pos.info.openAvgPx 和 pos.info.closeAvgPx
-          // pos.info.closeTotalPos 是平仓数量（张数）
-          const contracts = Math.abs(parseFloat(String(pos.info?.closeTotalPos || pos.info?.sz || '0')));
-          const entryPrice = parseFloat(String(pos.info?.openAvgPx || pos.entryPrice || '0'));
-          const exitPrice = parseFloat(String(pos.info?.closeAvgPx || pos.markPrice || '0'));
-          const leverage = parseFloat(String(pos.leverage || pos.info?.lever || '1'));
+          // 获取持仓方向
+          const side = pos.posSide === 'short' ? 'short' : 'long';
           
-          // OKX 的 realizedPnl 字段包含了实际盈亏
-          const realizedPnl = parseFloat(String(pos.info?.pnl || pos.info?.realizedPnl || '0'));
+          // 平仓数量（张数）转换为实际币数量
+          const posSize = Math.abs(parseFloat(String(pos.closeTotalPos || '0')));
+          // 需要从市场信息获取 contractSize，这里先用默认映射
+          const contractSizeMap: {[key: string]: number} = {
+            'BTC': 0.01, 'ETH': 0.1, 'SOL': 1, 'BNB': 0.01
+          };
+          const contractSize = contractSizeMap[symbol] || 1;
+          const contracts = posSize * contractSize;
           
-          // 从 info 中获取时间戳
-          // cTime = 创建时间（开仓时间），uTime = 更新时间（平仓时间）
-          const entryTime = pos.info?.cTime ? parseInt(pos.info.cTime) : (pos.timestamp || Date.now());
-          const exitTime = pos.info?.uTime ? parseInt(pos.info.uTime) : Date.now();
+          const entryPrice = parseFloat(String(pos.openAvgPx || '0'));
+          const exitPrice = parseFloat(String(pos.closeAvgPx || '0'));
+          const leverage = parseFloat(String(pos.lever || '1'));
+          
+          // 使用 realizedPnl（已实现盈亏，包含手续费）而不是 pnl（不含手续费）
+          // realizedPnl = pnl + fee
+          const realizedPnl = parseFloat(String(pos.realizedPnl || pos.pnl || '0'));
+          const fee = parseFloat(String(pos.fee || '0'));
+          
+          // 时间戳（毫秒）
+          const entryTime = parseInt(pos.cTime || '0');
+          const exitTime = parseInt(pos.uTime || '0');
 
           return {
             symbol,
-            side: pos.side === 'long' ? 'long' : 'short',
+            side,
             contracts,
             entryPrice,
             exitPrice,
