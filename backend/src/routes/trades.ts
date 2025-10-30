@@ -14,7 +14,7 @@ const exchangeClients: Map<string, ExchangeClient> = new Map();
 // 交易数据缓存
 let tradesCache: any[] = [];
 let lastFetchTime = 0;
-const CACHE_DURATION = 30000; // 30秒缓存
+const CACHE_DURATION = 10000; // 10秒缓存
 
 // 后台定时更新缓存
 async function updateTradesCache() {
