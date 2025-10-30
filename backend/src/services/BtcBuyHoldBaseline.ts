@@ -64,8 +64,9 @@ export class BtcBuyHoldBaseline {
 
   /**
    * 收集快照数据
+   * @param timestamp 可选的时间戳，如果不提供则使用当前时间
    */
-  async collectSnapshot(): Promise<void> {
+  async collectSnapshot(timestamp?: number): Promise<void> {
     try {
       if (this.initialBtcQuantity === null) {
         await this.initialize();
@@ -80,12 +81,13 @@ export class BtcBuyHoldBaseline {
       // 计算未实现盈亏
       const unrealizedPnl = currentValue - this.initialBalance;
       
-      const timestamp = Math.floor(Date.now() / 1000);
+      // 使用传入的 timestamp 或当前时间
+      const snapshotTimestamp = timestamp || Math.floor(Date.now() / 1000);
 
       // 保存账户快照
       const snapshotId = await db.saveAccountSnapshot({
         model_id: this.modelId,
-        timestamp,
+        timestamp: snapshotTimestamp,
         dollar_equity: currentValue,
         total_unrealized_pnl: unrealizedPnl,
         available_cash: 0, // Buy&Hold 策略没有可用现金
@@ -103,7 +105,7 @@ export class BtcBuyHoldBaseline {
         leverage: 1,
         unrealized_pnl: unrealizedPnl,
         notional_usd: currentValue,
-        timestamp,
+        timestamp: snapshotTimestamp,
       });
 
       console.log(`[BtcBuyHold] Snapshot saved: $${currentValue.toFixed(2)} (PnL: ${unrealizedPnl >= 0 ? '+' : ''}$${unrealizedPnl.toFixed(2)})`);

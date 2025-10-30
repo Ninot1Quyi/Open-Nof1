@@ -234,10 +234,10 @@ export class DataCollector {
       }
     }
 
-    // 收集 BTC Buy&Hold 基准数据
+    // 收集 BTC Buy&Hold 基准数据（使用相同的 timestamp）
     if (this.btcBuyHoldBaseline) {
       try {
-        await this.btcBuyHoldBaseline.collectSnapshot();
+        await this.btcBuyHoldBaseline.collectSnapshot(timestamp);
       } catch (error) {
         console.error('[DataCollector] Error collecting BTC Buy&Hold snapshot:', error);
       }

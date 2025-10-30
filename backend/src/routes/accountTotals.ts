@@ -83,6 +83,13 @@ router.get('/account-totals', async (req: Request, res: Response) => {
               const actualQuantity = pos.quantity;
               const signedQuantity = side === 'short' ? -actualQuantity : actualQuantity;
               
+              // 转换 exit_plan 字段名：invalidation -> invalidation_condition
+              const originalExitPlan = tradeRecord?.exit_plan || {};
+              const exitPlan = {
+                ...originalExitPlan,
+                invalidation_condition: originalExitPlan.invalidation || originalExitPlan.invalidation_condition
+              };
+
               positionsBySymbol[coin] = {
                 symbol: coin,
                 side: side,
@@ -94,7 +101,7 @@ router.get('/account-totals', async (req: Request, res: Response) => {
                 margin: pos.margin,
                 notional_usd: Math.abs(actualQuantity * pos.currentPrice),
                 position_id: tradeRecord?.position_id,
-                exit_plan: tradeRecord?.exit_plan || {},
+                exit_plan: exitPlan,
                 confidence: tradeRecord?.confidence,
                 sl_oid: tradeRecord?.sl_oid,
                 tp_oid: tradeRecord?.tp_oid,
