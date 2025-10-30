@@ -46,6 +46,7 @@ router.get('/account-totals', async (req: Request, res: Response) => {
     
     const accountTotals = [];
     
+    // 1. 处理交易 Agent 模型
     for (const modelId of modelIds) {
       try {
         // 1. 实时从交易所获取账户状态
@@ -137,6 +138,44 @@ router.get('/account-totals', async (req: Request, res: Response) => {
         console.error(`[API] Error fetching data for ${modelId}:`, modelError);
         // 继续处理其他模型
       }
+    }
+    
+    // 2. 添加 BTC Buy&Hold 基准数据（从数据库读取最新快照）
+    try {
+      const btcBuyHoldSnapshots = await db.getLatestAccountSnapshots();
+      const btcBuyHoldSnapshot = btcBuyHoldSnapshots.find(s => s.model_id === 'btc-buy-hold');
+      
+      if (btcBuyHoldSnapshot) {
+        // 获取 BTC Buy&Hold 的持仓信息
+        const btcPositions = await db.getLatestPositionsByModel('btc-buy-hold');
+        const positionsBySymbol: { [key: string]: any } = {};
+        
+        for (const pos of btcPositions) {
+          positionsBySymbol[pos.symbol] = {
+            symbol: pos.symbol,
+            side: pos.side,
+            entry_price: pos.entry_price,
+            current_price: pos.current_price,
+            quantity: pos.quantity,
+            leverage: pos.leverage,
+            unrealized_pnl: pos.unrealized_pnl,
+            notional_usd: pos.notional_usd,
+            timestamp: pos.timestamp,
+          };
+        }
+        
+        accountTotals.push({
+          id: `btc-buy-hold_${btcBuyHoldSnapshot.timestamp}`,
+          model_id: 'btc-buy-hold',
+          dollar_equity: parseFloat(btcBuyHoldSnapshot.dollar_equity),
+          total_unrealized_pnl: parseFloat(btcBuyHoldSnapshot.total_unrealized_pnl),
+          available_cash: parseFloat(btcBuyHoldSnapshot.available_cash),
+          timestamp: btcBuyHoldSnapshot.timestamp,
+          positions: positionsBySymbol,
+        });
+      }
+    } catch (btcError) {
+      console.error('[API] Error fetching BTC Buy&Hold data:', btcError);
     }
     
     res.json({

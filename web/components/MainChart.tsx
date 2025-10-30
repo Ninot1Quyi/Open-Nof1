@@ -24,7 +24,7 @@ const MODEL_ORDER = [
   'grok-4',
   'deepseek-chat-v3.1',
   'qwen3-max',
-  'buynhold_btc',
+  'btc-buy-hold',  // BTC Buy&Hold 基准策略
 ]
 
 interface AccountData {

@@ -4,6 +4,7 @@
  */
 
 import { ExchangeClient, ExchangeConfig } from './ExchangeClient.js';
+import { BtcBuyHoldBaseline } from './BtcBuyHoldBaseline.js';
 import * as db from '../database/db.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -19,12 +20,13 @@ const __dirname = dirname(__filename);
 const projectRoot = path.join(__dirname, '..', '..', '..');
 
 // MCP 数据库连接池（用于同步已完成交易）
+// 注意：MCP 和后端使用同一个数据库 nof1
 const mcpPool = new Pool({
-  host: process.env.MCP_DB_HOST || 'localhost',
-  port: parseInt(process.env.MCP_DB_PORT || '5432'),
-  database: process.env.MCP_DB_NAME || 'nof1',
-  user: process.env.MCP_DB_USER || 'OpenNof1',
-  password: process.env.MCP_DB_PASSWORD || '',
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '5432'),
+  database: process.env.DB_NAME || 'nof1',
+  user: process.env.DB_USER || 'OpenNof1',
+  password: process.env.DB_PASSWORD || '',
 });
 
 // 支持的模型列表（将在运行时从 profiles 目录动态读取）
@@ -41,6 +43,7 @@ interface AgentConfig {
 
 export class DataCollector {
   private exchangeClients: Map<string, ExchangeClient> = new Map();
+  private btcBuyHoldBaseline: BtcBuyHoldBaseline | null = null;
   private snapshotInterval: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
 
@@ -58,6 +61,12 @@ export class DataCollector {
 
     // 初始化交易所客户端
     await this.initializeExchangeClients();
+
+    // 初始化 BTC Buy&Hold 基准策略
+    const initialBalance = parseFloat(process.env.INITIAL_BALANCE || '10000');
+    this.btcBuyHoldBaseline = new BtcBuyHoldBaseline(initialBalance);
+    await this.btcBuyHoldBaseline.initialize();
+    console.log('[DataCollector] ✓ BTC Buy&Hold baseline initialized');
 
     this.isRunning = true;
 
@@ -222,6 +231,15 @@ export class DataCollector {
         console.log(`[DataCollector] ✓ Saved snapshot for ${modelId}: $${accountState.accountValue.toFixed(2)} (${accountState.positions.length} positions)`);
       } catch (error) {
         console.error(`[DataCollector] Error collecting data for ${modelId}:`, error);
+      }
+    }
+
+    // 收集 BTC Buy&Hold 基准数据
+    if (this.btcBuyHoldBaseline) {
+      try {
+        await this.btcBuyHoldBaseline.collectSnapshot();
+      } catch (error) {
+        console.error('[DataCollector] Error collecting BTC Buy&Hold snapshot:', error);
       }
     }
 

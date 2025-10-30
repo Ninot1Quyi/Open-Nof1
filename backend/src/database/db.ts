@@ -19,7 +19,7 @@ dotenv.config({ path: path.join(projectRoot, '.env') });
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'nof1',
+  database: process.env.DB_NAME || 'nof1',  // 统一使用 nof1 数据库
   user: process.env.DB_USER || 'OpenNof1',
   password: process.env.DB_PASSWORD || '',
   max: 20,

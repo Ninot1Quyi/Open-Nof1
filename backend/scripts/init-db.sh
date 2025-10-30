@@ -16,7 +16,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # 数据库配置
-DB_NAME=${DB_NAME:-ai_trading}
+DB_NAME=${DB_NAME:-nof1}
 DB_USER=${DB_USER:-OpenNof1}
 
 echo "数据库名称: $DB_NAME"
