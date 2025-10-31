@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { ExchangeClient } from '../services/ExchangeClient.js';
+import * as db from '../database/db.js';
 
 const router = Router();
 
@@ -16,6 +17,17 @@ let tradesCache: any[] = [];
 let lastFetchTime = 0;
 const CACHE_DURATION = 10000; // 10秒缓存
 
+// 获取交易会话启动时间（从 trading_session 表）
+async function getStartTimestamp(): Promise<number | null> {
+  try {
+    const startTime = await db.getOrInitTradingSessionStartTime();
+    return startTime;
+  } catch (error) {
+    console.error('[Trades] Error getting trading session start time:', error);
+    return null;
+  }
+}
+
 // 后台定时更新缓存
 async function updateTradesCache() {
   try {
@@ -23,12 +35,31 @@ async function updateTradesCache() {
     const modelIds = ['deepseek-chat-v3.1'];
     const allTrades: any[] = [];
     
+    // 获取起始时间（交易会话启动时间）
+    const startTimestamp = await getStartTimestamp();
+    
     for (const modelId of modelIds) {
       try {
+        
         const exchangeClient = getExchangeClient(modelId);
         const closedPositions = await exchangeClient.getClosedPositions(100);
         
-        const formattedTrades = closedPositions.map((pos, index) => {
+        // 过滤：只保留起始时间之后的交易
+        const filteredPositions = startTimestamp 
+          ? closedPositions.filter(pos => {
+              const exitTimeSec = Math.floor(pos.exitTime / 1000);
+              const shouldKeep = exitTimeSec >= startTimestamp;
+              if (!shouldKeep && closedPositions.indexOf(pos) < 3) {
+                // 打印前3个被过滤的交易用于调试
+                console.log(`[Background] Filtered out: ${pos.symbol} exit=${exitTimeSec}, start=${startTimestamp}, diff=${startTimestamp - exitTimeSec}s`);
+              }
+              return shouldKeep;
+            })
+          : closedPositions;
+        
+        console.log(`[Background] ${modelId}: ${closedPositions.length} total trades, ${filteredPositions.length} after reset (startTime=${startTimestamp})`);
+        
+        const formattedTrades = filteredPositions.map((pos, index) => {
           const entryDate = new Date(pos.entryTime);
           const exitDate = new Date(pos.exitTime);
           const holdingTimeMs = pos.exitTime - pos.entryTime;
@@ -113,14 +144,24 @@ router.get('/trades', async (req: Request, res: Response) => {
     
     const allTrades: any[] = [];
     
+    // 获取起始时间（交易会话启动时间）
+    const startTimestamp = await getStartTimestamp();
+    
     for (const modelId of modelIds) {
       try {
         // 从交易所获取历史仓位
         const exchangeClient = getExchangeClient(modelId);
         const closedPositions = await exchangeClient.getClosedPositions(100);
         
+        // 过滤：只保留起始时间之后的交易
+        const filteredPositions = startTimestamp 
+          ? closedPositions.filter(pos => Math.floor(pos.exitTime / 1000) >= startTimestamp)
+          : closedPositions;
+        
+        console.log(`[API] ${modelId}: ${closedPositions.length} total trades, ${filteredPositions.length} after reset`);
+        
         // 转换为前端需要的格式
-        const formattedTrades = closedPositions.map((pos, index) => {
+        const formattedTrades = filteredPositions.map((pos, index) => {
           const entryDate = new Date(pos.entryTime);
           const exitDate = new Date(pos.exitTime);
           

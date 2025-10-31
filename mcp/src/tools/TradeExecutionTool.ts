@@ -113,6 +113,29 @@ export class TradeExecutionTool {
     const existingTrades = await this.db.getOpenTrades();
     const existingPosition = existingTrades.find(t => t.coin === coin && t.side === side);
     
+    // ⚠️ 重要：无论是否有现有仓位，都先取消该币种的所有止损止盈订单
+    // 这样可以避免重复创建订单
+    console.log(`[INFO] Cancelling all existing SL/TP orders for ${coin}...`);
+    try {
+      const openOrders = await this.exchange.getOpenOrders(coin);
+      let cancelledCount = 0;
+      for (const order of openOrders) {
+        if (order.type === 'stop' || order.type === 'take_profit' || order.type === 'stop_market') {
+          console.log(`[INFO] Cancelling order ${order.id} (${order.type})`);
+          await this.exchange.cancelOrder(order.id, coin);
+          cancelledCount++;
+        }
+      }
+      if (cancelledCount > 0) {
+        console.log(`[INFO] ✓ Cancelled ${cancelledCount} SL/TP orders for ${coin}`);
+      } else {
+        console.log(`[INFO] ✓ No existing SL/TP orders to cancel for ${coin}`);
+      }
+    } catch (error) {
+      console.error(`[WARN] Failed to cancel some orders:`, error);
+      // 继续执行，不阻止开仓
+    }
+    
     if (existingPosition) {
       console.log(`[INFO] Found existing ${side} position for ${coin}. Will ADD to position.`);
       
@@ -121,23 +144,6 @@ export class TradeExecutionTool {
         console.warn(`[WARN] Leverage mismatch! Existing: ${existingPosition.leverage}x, Requested: ${leverage}x`);
         console.warn(`[WARN] Using existing leverage ${existingPosition.leverage}x to maintain consistency`);
         leverage = existingPosition.leverage;  // 强制使用现有杠杆
-      }
-      
-      console.log(`[INFO] Cancelling existing stop-loss and take-profit orders before adding...`);
-      
-      // 取消现有的止损止盈委托
-      try {
-        const openOrders = await this.exchange.getOpenOrders(coin);
-        for (const order of openOrders) {
-          if (order.type === 'stop' || order.type === 'take_profit' || order.type === 'stop_market') {
-            console.log(`[INFO] Cancelling order ${order.id} (${order.type})`);
-            await this.exchange.cancelOrder(order.id, coin);
-          }
-        }
-        console.log(`[INFO] ✓ All SL/TP orders cancelled. Proceeding with adding to position.`);
-      } catch (error) {
-        console.error(`[WARN] Failed to cancel some orders:`, error);
-        // 继续执行，不阻止加仓
       }
     } else {
       console.log(`[CHECK] ✓ No existing ${side} position found for ${coin}. Opening new position.`);

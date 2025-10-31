@@ -33,6 +33,10 @@ export interface CoinMarketData {
   rsi14_series?: number[];
   volume_24h?: number;
   change_24h?: number;
+  atr3?: number;
+  atr14?: number;
+  volume_current?: number;
+  volume_average?: number;
 }
 
 export interface MarketDataResponse {

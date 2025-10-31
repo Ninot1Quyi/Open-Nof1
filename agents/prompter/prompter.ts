@@ -156,10 +156,10 @@ class Prompter {
         rsi14_array: coinData.rsi14_series?.slice(-10) || [],
         ema20_4h: coinData.current_ema20 || 0,
         ema50_4h: coinData.current_ema50 || 0,
-        atr3: 0, // TODO: 需要添加ATR计算
-        atr14: 0,
-        volume_current: 0, // TODO: 需要添加成交量数据
-        volume_average: 0,
+        atr3: coinData.atr3 || 0,
+        atr14: coinData.atr14 || 0,
+        volume_current: coinData.volume_current || 0,
+        volume_average: coinData.volume_average || 0,
         macd_4h_array: coinData.macd_series?.slice(-10) || [],
         rsi14_4h_array: coinData.rsi14_series?.slice(-10) || [],
       };
@@ -181,23 +181,31 @@ class Prompter {
       total_return_pct: totalReturnPct,
       available_cash: response.available_cash || 0,
       account_value: response.account_value || 0,
-      positions: (response.active_positions || []).map((pos: any) => ({
-        symbol: pos.coin,
-        quantity: pos.quantity,
-        entry_price: pos.entry_price,
-        current_price: pos.current_price,
-        liquidation_price: pos.liquidation_price,
-        unrealized_pnl: pos.unrealized_pnl,
-        leverage: pos.leverage,
-        exit_plan: pos.exit_plan || {},
-        confidence: 0.7, // 默认值
-        risk_usd: 0, // 默认值
-        sl_oid: -1,
-        tp_oid: -1,
-        wait_for_fill: false,
-        entry_oid: -1,
-        notional_usd: pos.quantity * pos.current_price * pos.leverage,
-      })),
+      positions: (response.active_positions || []).map((pos: any) => {
+        // 确保 exit_plan 有完整的结构
+        const exitPlan = pos.exit_plan || {};
+        return {
+          symbol: pos.coin,
+          quantity: pos.quantity,
+          entry_price: pos.entry_price,
+          current_price: pos.current_price,
+          liquidation_price: pos.liquidation_price,
+          unrealized_pnl: pos.unrealized_pnl,
+          leverage: pos.leverage,
+          exit_plan: {
+            profit_target: exitPlan.profit_target || 0,
+            stop_loss: exitPlan.stop_loss || 0,
+            invalidation_condition: exitPlan.invalidation_condition || exitPlan.invalidation || ''
+          },
+          confidence: 0.7, // 默认值
+          risk_usd: 0, // 默认值
+          sl_oid: -1,
+          tp_oid: -1,
+          wait_for_fill: false,
+          entry_oid: -1,
+          notional_usd: pos.quantity * pos.current_price * pos.leverage,
+        };
+      }),
       sharpe_ratio: response.sharpe_ratio || 0,
     };
   }
@@ -211,16 +219,16 @@ class Prompter {
     // 替换币种名称
     filled = filled.replace(/{COIN}/g, coin);
 
-    // 替换当前快照数据
-    filled = filled.replace(/{price}/g, data.price.toString());
-    filled = filled.replace(/{ema20}/g, data.ema20.toString());
-    filled = filled.replace(/{macd}/g, data.macd.toString());
-    filled = filled.replace(/{rsi7}/g, data.rsi7.toString());
+    // 替换当前快照数据（保留3位小数）
+    filled = filled.replace(/{price}/g, this.formatNumber(data.price));
+    filled = filled.replace(/{ema20}/g, this.formatNumber(data.ema20));
+    filled = filled.replace(/{macd}/g, this.formatNumber(data.macd));
+    filled = filled.replace(/{rsi7}/g, this.formatNumber(data.rsi7));
 
     // 替换持仓量和资金费率
-    filled = filled.replace(/{oi_latest}/g, data.oi_latest.toString());
-    filled = filled.replace(/{oi_average}/g, data.oi_average.toString());
-    filled = filled.replace(/{funding_rate}/g, data.funding_rate.toExponential());
+    filled = filled.replace(/{oi_latest}/g, this.formatNumber(data.oi_latest, 0)); // 持仓量不需要小数
+    filled = filled.replace(/{oi_average}/g, this.formatNumber(data.oi_average, 0));
+    filled = filled.replace(/{funding_rate}/g, data.funding_rate.toExponential(3)); // 科学计数法保留3位
 
     // 替换3分钟时间序列
     filled = filled.replace(/{price_array}/g, this.formatArray(data.price_array));
@@ -230,12 +238,12 @@ class Prompter {
     filled = filled.replace(/{rsi14_array}/g, this.formatArray(data.rsi14_array));
 
     // 替换4小时数据
-    filled = filled.replace(/{ema20_4h}/g, data.ema20_4h.toString());
-    filled = filled.replace(/{ema50_4h}/g, data.ema50_4h.toString());
-    filled = filled.replace(/{atr3}/g, data.atr3.toString());
-    filled = filled.replace(/{atr14}/g, data.atr14.toString());
-    filled = filled.replace(/{volume_current}/g, data.volume_current.toString());
-    filled = filled.replace(/{volume_average}/g, data.volume_average.toString());
+    filled = filled.replace(/{ema20_4h}/g, this.formatNumber(data.ema20_4h));
+    filled = filled.replace(/{ema50_4h}/g, this.formatNumber(data.ema50_4h));
+    filled = filled.replace(/{atr3}/g, this.formatNumber(data.atr3));
+    filled = filled.replace(/{atr14}/g, this.formatNumber(data.atr14));
+    filled = filled.replace(/{volume_current}/g, this.formatNumber(data.volume_current));
+    filled = filled.replace(/{volume_average}/g, this.formatNumber(data.volume_average));
     filled = filled.replace(/{macd_4h_array}/g, this.formatArray(data.macd_4h_array));
     filled = filled.replace(/{rsi14_4h_array}/g, this.formatArray(data.rsi14_4h_array));
 
@@ -243,10 +251,22 @@ class Prompter {
   }
 
   /**
+   * 格式化数字，保留最多3位小数
+   */
+  private formatNumber(num: number, maxDecimals: number = 3): string {
+    // 对于整数或接近整数的值，不显示小数
+    if (Math.abs(num - Math.round(num)) < 0.001) {
+      return Math.round(num).toString();
+    }
+    // 对于小数，保留最多 maxDecimals 位
+    return Number(num.toFixed(maxDecimals)).toString();
+  }
+
+  /**
    * 格式化数组为字符串
    */
   private formatArray(arr: number[]): string {
-    return arr.map(n => n.toString()).join(', ');
+    return arr.map(n => this.formatNumber(n)).join(', ');
   }
 
   /**
@@ -254,8 +274,14 @@ class Prompter {
    */
   private formatPositions(positions: Position[]): string {
     return positions.map(pos => {
-      return `{'symbol': '${pos.symbol}', 'quantity': ${pos.quantity}, 'entry_price': ${pos.entry_price}, 'current_price': ${pos.current_price}, 'liquidation_price': ${pos.liquidation_price}, 'unrealized_pnl': ${pos.unrealized_pnl}, 'leverage': ${pos.leverage}, 'exit_plan': {'profit_target': ${pos.exit_plan.profit_target}, 'stop_loss': ${pos.exit_plan.stop_loss}, 'invalidation_condition': '${pos.exit_plan.invalidation_condition}'}, 'confidence': ${pos.confidence}, 'risk_usd': ${pos.risk_usd}, 'sl_oid': ${pos.sl_oid}, 'tp_oid': ${pos.tp_oid}, 'wait_for_fill': ${pos.wait_for_fill}, 'entry_oid': ${pos.entry_oid}, 'notional_usd': ${pos.notional_usd}}`;
-    }).join('\n');
+      // 处理 invalidation_condition
+      const invalidation = pos.exit_plan.invalidation_condition && pos.exit_plan.invalidation_condition.trim() 
+        ? pos.exit_plan.invalidation_condition 
+        : 'No specific invalidation condition set';
+      
+      // 显示所有字段，保持与示例一致的格式
+      return `{'symbol': '${pos.symbol}', 'quantity': ${this.formatNumber(pos.quantity)}, 'entry_price': ${this.formatNumber(pos.entry_price)}, 'current_price': ${this.formatNumber(pos.current_price)}, 'liquidation_price': ${this.formatNumber(pos.liquidation_price)}, 'unrealized_pnl': ${this.formatNumber(pos.unrealized_pnl)}, 'leverage': ${pos.leverage}, 'exit_plan': {'profit_target': ${this.formatNumber(pos.exit_plan.profit_target)}, 'stop_loss': ${this.formatNumber(pos.exit_plan.stop_loss)}, 'invalidation_condition': '${invalidation}'}, 'confidence': ${pos.confidence}, 'risk_usd': ${this.formatNumber(pos.risk_usd)}, 'sl_oid': ${pos.sl_oid}, 'tp_oid': ${pos.tp_oid}, 'wait_for_fill': ${pos.wait_for_fill}, 'entry_oid': ${pos.entry_oid}, 'notional_usd': ${this.formatNumber(pos.notional_usd)}}`;
+    }).join('\n');  // 使用换行符分隔不同币种的持仓
   }
 
   /**
@@ -291,7 +317,8 @@ class Prompter {
     // 时间和上下文
     userPrompt = userPrompt.replace(/{elapsed_minutes}/g, elapsedMinutes.toString());
     userPrompt = userPrompt.replace(/{current_timestamp}/g, new Date().toISOString());
-    userPrompt = userPrompt.replace(/{invocation_count}/g, invocationCount.toString());
+    // 将 invocationCount 向下取整，避免显示小数（如 2.5 -> 2）
+    userPrompt = userPrompt.replace(/{invocation_count}/g, Math.floor(invocationCount).toString());
 
     // 币种数据部分
     userPrompt = userPrompt.replace(/{COIN_DATA_SECTION}/g, coinDataSection);
@@ -416,8 +443,113 @@ async function getFullPrompt(
   return { systemPrompt, userPrompt };
 }
 
+/**
+ * 保存 Prompt 到日志文件
+ * @param userPrompt - 用户提示词
+ * @param cycleId - 决策周期 ID
+ * @param agentName - Agent 名称（可选）
+ * @returns 保存的文件路径
+ */
+function savePromptToLog(
+  userPrompt: string,
+  cycleId: number,
+  agentName: string = 'default'
+): string {
+  // 创建logs目录（如果不存在）
+  const logsDir = path.join(__dirname, '../logs/prompts');
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+  }
+  
+  // 生成文件名：prompt_[agentName]_[cycleId]_[timestamp].txt
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `prompt_${agentName}_cycle${cycleId}_${timestamp}.txt`;
+  const filepath = path.join(logsDir, filename);
+  
+  // 添加元数据头部
+  const header = `# User Prompt Log
+Agent: ${agentName}
+Cycle ID: ${cycleId}
+Generated at: ${new Date().toISOString()}
+Length: ${userPrompt.length} characters
+
+${'='.repeat(80)}
+
+`;
+  
+  const content = header + userPrompt;
+  
+  // 保存到文件
+  fs.writeFileSync(filepath, content, 'utf-8');
+  console.log(`[Prompter] Saved prompt to: ${filepath}`);
+  
+  return filepath;
+}
+
+/**
+ * 保存完整的 Prompt（System + User）到日志文件
+ * @param systemPrompt - 系统提示词
+ * @param userPrompt - 用户提示词
+ * @param cycleId - 决策周期 ID
+ * @param agentName - Agent 名称（可选）
+ * @returns 保存的文件路径
+ */
+function saveFullPromptToLog(
+  systemPrompt: string,
+  userPrompt: string,
+  cycleId: number,
+  agentName: string = 'default'
+): string {
+  // 创建logs目录（如果不存在）
+  const logsDir = path.join(__dirname, '../logs/prompts');
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+  }
+  
+  // 生成文件名
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `full_prompt_${agentName}_cycle${cycleId}_${timestamp}.txt`;
+  const filepath = path.join(logsDir, filename);
+  
+  // 组合内容
+  const content = `# Full Prompt Log (System + User)
+Agent: ${agentName}
+Cycle ID: ${cycleId}
+Generated at: ${new Date().toISOString()}
+System Prompt Length: ${systemPrompt.length} characters
+User Prompt Length: ${userPrompt.length} characters
+
+${'='.repeat(80)}
+SYSTEM PROMPT
+${'='.repeat(80)}
+
+${systemPrompt}
+
+${'='.repeat(80)}
+USER PROMPT
+${'='.repeat(80)}
+
+${userPrompt}
+`;
+  
+  // 保存到文件
+  fs.writeFileSync(filepath, content, 'utf-8');
+  console.log(`[Prompter] Saved full prompt to: ${filepath}`);
+  
+  return filepath;
+}
+
 // 导出
-export { Prompter, MarketData, AccountInfo, Position, getSystemPrompt, getFullPrompt };
+export { 
+  Prompter, 
+  MarketData, 
+  AccountInfo, 
+  Position, 
+  getSystemPrompt, 
+  getFullPrompt,
+  savePromptToLog,
+  saveFullPromptToLog
+};
 
 // 使用示例
 async function main() {

@@ -104,7 +104,18 @@ CREATE TABLE IF NOT EXISTS btc_buyhold_baseline (
   UNIQUE(initial_balance)  -- 确保同一个初始资金只有一条记录
 );
 
--- 8. 数据清理函数：删除7天前的快照数据（可选，用于节省空间）
+-- 8. 交易会话表 - 存储程序首次启动时间
+CREATE TABLE IF NOT EXISTS trading_session (
+  id SERIAL PRIMARY KEY,
+  session_start_time BIGINT NOT NULL,  -- Unix时间戳（秒），程序首次启动时间
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 确保只有一条记录
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trading_session_single_row ON trading_session((id IS NOT NULL));
+
+-- 9. 数据清理函数：删除7天前的快照数据（可选，用于节省空间）
 CREATE OR REPLACE FUNCTION cleanup_old_snapshots() RETURNS void AS $$
 BEGIN
   DELETE FROM account_snapshots 
@@ -118,3 +129,4 @@ COMMENT ON TABLE positions IS '仓位表 - 每15秒保存一次所有模型的�
 COMMENT ON TABLE completed_trades IS '已完成交易表 - 从MCP数据库同步的历史交易';
 COMMENT ON TABLE agent_conversations IS 'Agent对话记录表 - 保存AI的决策过程和思考链';
 COMMENT ON TABLE btc_buyhold_baseline IS 'BTC Buy&Hold 基准策略表 - 存储初始BTC购买数量，用于计算基准收益';
+COMMENT ON TABLE trading_session IS '交易会话表 - 存储程序首次启动时间，用于计算交易时长和过滤历史数据';

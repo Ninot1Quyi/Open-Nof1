@@ -46,6 +46,7 @@ export class DataCollector {
   private btcBuyHoldBaseline: BtcBuyHoldBaseline | null = null;
   private snapshotInterval: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
+  private lastBtcSnapshotTime: number = 0; // 上次 BTC Buy&Hold 快照时间
 
   /**
    * 启动数据收集服务
@@ -65,8 +66,15 @@ export class DataCollector {
     // 初始化 BTC Buy&Hold 基准策略
     const initialBalance = parseFloat(process.env.INITIAL_BALANCE || '10000');
     this.btcBuyHoldBaseline = new BtcBuyHoldBaseline(initialBalance);
-    await this.btcBuyHoldBaseline.initialize();
-    console.log('[DataCollector] ✓ BTC Buy&Hold baseline initialized');
+    
+    // 异步初始化，不阻塞启动
+    this.btcBuyHoldBaseline.initialize()
+      .then(() => {
+        console.log('[DataCollector] ✓ BTC Buy&Hold baseline initialized');
+      })
+      .catch((error) => {
+        console.error('[DataCollector] ⚠ BTC Buy&Hold initialization failed, will retry later:', error.message);
+      });
 
     this.isRunning = true;
 
@@ -234,10 +242,13 @@ export class DataCollector {
       }
     }
 
-    // 收集 BTC Buy&Hold 基准数据（使用相同的 timestamp）
-    if (this.btcBuyHoldBaseline) {
+    // 收集 BTC Buy&Hold 基准数据（每小时保存一次，而不是每 3 秒）
+    const BTC_SNAPSHOT_INTERVAL = 3; // 1 小时（秒）
+    if (this.btcBuyHoldBaseline && (timestamp - this.lastBtcSnapshotTime >= BTC_SNAPSHOT_INTERVAL)) {
       try {
         await this.btcBuyHoldBaseline.collectSnapshot(timestamp);
+        this.lastBtcSnapshotTime = timestamp;
+        console.log('[DataCollector] ✓ BTC Buy&Hold snapshot saved (next in 1 hour)');
       } catch (error) {
         console.error('[DataCollector] Error collecting BTC Buy&Hold snapshot:', error);
       }
@@ -254,7 +265,8 @@ export class DataCollector {
   }
 
   /**
-   * 从交易所 API 同步已完成的交易（最近的订单历史）
+   * 从交易所 API 同步已完成的交易（历史仓位）
+   * 使用 getClosedPositions() 获取完整的仓位信息，包括正确的杠杆倍数
    */
   private async syncCompletedTrades(): Promise<void> {
     try {
@@ -262,53 +274,46 @@ export class DataCollector {
       // 遍历所有 Agent 的交易所客户端
       for (const [modelId, exchangeClient] of this.exchangeClients.entries()) {
         try {
-          // 获取最近的已完成订单（最多100条）
-          const orders = await exchangeClient.getExchange().fetchClosedOrders(undefined, undefined, 100);
-          console.log(`[DataCollector] Fetched ${orders.length} closed orders for ${modelId}`);
+          // 使用 getClosedPositions() 获取历史仓位（包含完整信息）
+          const closedPositions = await exchangeClient.getClosedPositions(100);
+          console.log(`[DataCollector] Fetched ${closedPositions.length} closed positions for ${modelId}`);
           
           let syncedCount = 0;
-          for (const order of orders) {
-            // 只处理已完成的订单
-            if (order.status !== 'closed' || !order.filled) continue;
-            
-            const symbol = order.symbol?.split('/')[0] || '';
-            const side = order.side === 'buy' ? 'long' : 'short';
-            
-            // 计算实际盈亏（需要找到对应的平仓订单）
-            // 这里简化处理，使用订单的 cost 和 fee
-            const realizedPnl = order.cost ? parseFloat(String(order.cost)) : 0;
-            
+          for (const position of closedPositions) {
             try {
+              // 生成唯一 ID（使用 symbol + exitTime）
+              const tradeId = `${modelId}_${position.symbol}_${position.exitTime}`;
+              
               await db.saveCompletedTrade({
-                id: order.id || `${modelId}_${symbol}_${order.timestamp}`,
+                id: tradeId,
                 model_id: modelId,
-                symbol: symbol,
-                side: side,
-                quantity: order.filled || 0,
-                entry_price: order.price || 0,
-                exit_price: order.average || order.price || 0,
-                leverage: 1, // 订单信息中没有杠杆，默认1
-                realized_net_pnl: realizedPnl,
-                entry_time: order.timestamp ? Math.floor(order.timestamp / 1000) : Math.floor(Date.now() / 1000),
-                exit_time: order.timestamp ? Math.floor(order.timestamp / 1000) : Math.floor(Date.now() / 1000),
-                entry_human_time: order.datetime || new Date(order.timestamp || Date.now()).toISOString(),
-                exit_human_time: order.datetime || new Date(order.timestamp || Date.now()).toISOString(),
+                symbol: position.symbol,
+                side: position.side,
+                quantity: position.contracts, // 实际币数量
+                entry_price: position.entryPrice,
+                exit_price: position.exitPrice,
+                leverage: position.leverage, // ✅ 使用真实的杠杆倍数
+                realized_net_pnl: position.realizedPnl,
+                entry_time: Math.floor(position.entryTime / 1000), // 转换为秒
+                exit_time: Math.floor(position.exitTime / 1000), // 转换为秒
+                entry_human_time: new Date(position.entryTime),
+                exit_human_time: new Date(position.exitTime),
               });
               
               syncedCount++;
             } catch (error: any) {
-              // 忽略重复键错误
+              // 忽略重复键错误（23505 = unique_violation）
               if (error.code !== '23505') {
-                console.error(`[DataCollector] Error saving order ${order.id}:`, error);
+                console.error(`[DataCollector] Error saving position ${position.symbol}:`, error);
               }
             }
           }
           
           if (syncedCount > 0) {
-            console.log(`[DataCollector] ✓ Synced ${syncedCount} completed orders for ${modelId}`);
+            console.log(`[DataCollector] ✓ Synced ${syncedCount} completed positions for ${modelId}`);
           }
         } catch (error) {
-          console.error(`[DataCollector] Error fetching orders for ${modelId}:`, error);
+          console.error(`[DataCollector] Error fetching positions for ${modelId}:`, error);
         }
       }
     } catch (error) {

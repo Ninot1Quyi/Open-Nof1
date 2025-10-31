@@ -3,7 +3,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { config as dotenvConfig } from 'dotenv';
-import { Prompter, getSystemPrompt } from './prompter/prompter.js';
+import { Prompter, getSystemPrompt, savePromptToLog } from './prompter/prompter.js';
 import { getMCPClient } from './prompter/mcp-client.js';
 import { c, fmt } from './utils/colors.js';
 import pkg from 'pg';
@@ -741,6 +741,14 @@ export class TradingAgent {
     console.log(`\n${c.info('[INFO]')} Generating user prompt...`);
     const userPrompt = await this.generateUserPrompt(elapsedMinutes, invocationCount);
     console.log(`${c.info('[INFO]')} User prompt generated: ${userPrompt.length} characters`);
+
+    // 1.5 保存 Prompt 到日志文件
+    try {
+      const cycleId = Math.floor(invocationCount);
+      savePromptToLog(userPrompt, cycleId, this.config.modelId);
+    } catch (error) {
+      console.warn(c.warn('[WARN] Failed to save prompt to log:'), error);
+    }
 
     // 2. 添加到对话历史
     this.addMessage('user', userPrompt);

@@ -12,6 +12,8 @@ import {
   extractClosePrices,
   getLatest,
   average,
+  calculateATR,
+  extractVolume,
 } from '../utils/indicators.js';
 import config from '../config.js';
 
@@ -90,10 +92,12 @@ export class MarketDataTool {
         if (include_open_interest) {
           try {
             const openInterest = await this.exchange.getOpenInterest(coin);
+            console.log(`[MarketData] ${coin} OI from exchange: ${openInterest}`);
             coinData.open_interest = {
               latest: openInterest,
               average: openInterest, // Simplified - would need historical data
             };
+            console.log(`[MarketData] ${coin} OI saved to coinData: latest=${coinData.open_interest.latest}, avg=${coinData.open_interest.average}`);
           } catch (error) {
             console.warn(`Could not fetch open interest for ${coin}`);
           }
@@ -109,6 +113,17 @@ export class MarketDataTool {
         } catch (error) {
           console.warn(`Could not fetch 24h stats for ${coin}`);
         }
+
+        // Calculate ATR (3-period and 14-period)
+        coinData.atr3 = calculateATR(ohlcv, 3);
+        coinData.atr14 = calculateATR(ohlcv, 14);
+        console.log(`[MarketData] ${coin} ATR: 3-period=${coinData.atr3.toFixed(2)}, 14-period=${coinData.atr14.toFixed(2)}`);
+
+        // Extract volume data
+        const volumes = extractVolume(ohlcv);
+        coinData.volume_current = volumes[volumes.length - 1] || 0;
+        coinData.volume_average = average(volumes.slice(-20)); // Average of last 20 candles
+        console.log(`[MarketData] ${coin} Volume: current=${coinData.volume_current.toFixed(2)}, avg=${coinData.volume_average.toFixed(2)}`);
 
         coinsData[coin] = coinData;
       } catch (error) {

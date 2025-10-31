@@ -55,26 +55,70 @@ fi
 echo -n "4. 检查数据库用户 OpenNof1... "
 if psql postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='OpenNof1'" | grep -q 1; then
     echo -e "${GREEN}✓${NC}"
+    # 用户已存在，确保权限正确
+    psql postgres -c 'GRANT ALL PRIVILEGES ON DATABASE ai_trading TO "OpenNof1";' > /dev/null 2>&1
+    psql postgres -c 'GRANT ALL PRIVILEGES ON DATABASE nof1 TO "OpenNof1";' > /dev/null 2>&1
+    psql ai_trading -c 'GRANT ALL ON SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql ai_trading -c 'GRANT ALL ON ALL TABLES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql ai_trading -c 'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql ai_trading -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "OpenNof1";' > /dev/null 2>&1
+    psql ai_trading -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "OpenNof1";' > /dev/null 2>&1
+    psql nof1 -c 'GRANT ALL ON SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql nof1 -c 'GRANT ALL ON ALL TABLES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql nof1 -c 'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql nof1 -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "OpenNof1";' > /dev/null 2>&1
+    psql nof1 -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "OpenNof1";' > /dev/null 2>&1
 else
     echo -e "${YELLOW}! 用户不存在，正在创建...${NC}"
-    psql postgres -c 'CREATE USER "OpenNof1" WITH PASSWORD '"'"''"'"' CREATEDB;' > /dev/null 2>&1
+    psql postgres -c "CREATE USER \"OpenNof1\" WITH PASSWORD '' CREATEDB;" > /dev/null 2>&1
     psql postgres -c 'GRANT ALL PRIVILEGES ON DATABASE ai_trading TO "OpenNof1";' > /dev/null 2>&1
     psql postgres -c 'GRANT ALL PRIVILEGES ON DATABASE nof1 TO "OpenNof1";' > /dev/null 2>&1
     # 授予 schema 权限
     psql ai_trading -c 'GRANT ALL ON SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
     psql ai_trading -c 'GRANT ALL ON ALL TABLES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
     psql ai_trading -c 'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql ai_trading -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "OpenNof1";' > /dev/null 2>&1
+    psql ai_trading -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "OpenNof1";' > /dev/null 2>&1
     psql nof1 -c 'GRANT ALL ON SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
     psql nof1 -c 'GRANT ALL ON ALL TABLES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
     psql nof1 -c 'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO "OpenNof1";' > /dev/null 2>&1
+    psql nof1 -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "OpenNof1";' > /dev/null 2>&1
+    psql nof1 -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "OpenNof1";' > /dev/null 2>&1
     echo -e "${GREEN}✓ 创建成功${NC}"
 fi
 
 # 5. 初始化数据库表
 echo -n "5. 初始化数据库表... "
 cd "$PROJECT_ROOT/backend"
-psql -d nof1 -f database/schema.sql > /dev/null 2>&1
-echo -e "${GREEN}✓${NC}"
+
+# 执行 schema.sql 创建所有表
+if psql -d nof1 -f database/schema.sql > /dev/null 2>&1; then
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${RED}✗ 表创建失败${NC}"
+    echo -e "${YELLOW}正在尝试修复...${NC}"
+    
+    # 如果失败，尝试单独创建 trading_session 表（可能是新表）
+    psql -d nof1 <<EOF > /dev/null 2>&1
+CREATE TABLE IF NOT EXISTS trading_session (
+  id SERIAL PRIMARY KEY,
+  session_start_time BIGINT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trading_session_single_row ON trading_session((id IS NOT NULL));
+
+COMMENT ON TABLE trading_session IS '交易会话表 - 存储程序首次启动时间，用于计算交易时长和过滤历史数据';
+EOF
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ 修复成功${NC}"
+    else
+        echo -e "${RED}✗ 修复失败，请检查数据库连接${NC}"
+        exit 1
+    fi
+fi
 
 # 6. 检查后端配置
 echo -n "6. 检查后端配置... "

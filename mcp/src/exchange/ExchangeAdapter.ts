@@ -489,15 +489,41 @@ export class ExchangeAdapter {
   }
 
   /**
-   * Get open interest
+   * Get open interest (total outstanding contracts in the market)
+   * 使用 fetch 直接调用 OKX REST API，完全绕过 ccxt
+   * OKX API: https://www.okx.com/docs-v5/zh/#public-data-rest-api-get-open-interest
    */
   async getOpenInterest(symbol: string): Promise<number> {
     try {
-      // Note: Not all exchanges support this
-      const ticker = await this.exchange.fetchTicker(this.formatSymbol(symbol));
-      return (ticker.info as any)?.openInterest || 0;
+      const instId = `${symbol}-USDT-SWAP`;
+      // 根据沙盒模式选择 URL
+      const baseUrl = this.config.useSandbox 
+        ? 'https://www.okx.com'  // 沙盒也使用正式环境的公共数据
+        : 'https://www.okx.com';
+      const url = `${baseUrl}/api/v5/public/open-interest?instId=${instId}`;
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const data: any = await response.json();
+      
+      if (data.code === '0' && data.data && data.data.length > 0) {
+        // oiCcy 字段是持仓量（币的数量）
+        const oiCcy = parseFloat(data.data[0].oiCcy || '0');
+        const oiUsd = parseFloat(data.data[0].oiUsd || '0');
+        
+        console.log(`[ExchangeAdapter] ${symbol} Open Interest: ${oiCcy.toFixed(2)} ${symbol} ($${(oiUsd / 1e9).toFixed(2)}B)`);
+        
+        return oiCcy;
+      }
+      
+      return 0;
     } catch (error) {
-      console.error(`Error fetching open interest for ${symbol}:`, error);
+      console.warn(`Could not fetch open interest for ${symbol}:`, error);
       return 0;
     }
   }

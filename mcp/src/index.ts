@@ -45,7 +45,7 @@ const db = new DatabaseManager(agentName);
 const marketDataTool = new MarketDataTool(exchange);
 const accountStateTool = new AccountStateTool(exchange, db, agentName);
 const tradeExecutionTool = new TradeExecutionTool(exchange, db);
-const updateExitPlanTool = new UpdateExitPlanTool(db);
+const updateExitPlanTool = new UpdateExitPlanTool(db, exchange);
 const performanceMetricsTool = new PerformanceMetricsTool(db);
 
 // Create MCP server

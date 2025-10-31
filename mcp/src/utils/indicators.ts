@@ -131,3 +131,43 @@ export function average(arr: number[]): number {
   if (arr.length === 0) return 0;
   return arr.reduce((a, b) => a + b, 0) / arr.length;
 }
+
+/**
+ * Calculate ATR (Average True Range)
+ * @param ohlcv - OHLCV data array
+ * @param period - ATR period (default 14)
+ * @returns ATR value
+ */
+export function calculateATR(ohlcv: OHLCV[], period: number = 14): number {
+  if (ohlcv.length < period) return 0;
+  
+  const trueRanges: number[] = [];
+  
+  for (let i = 1; i < ohlcv.length; i++) {
+    const high = Number(ohlcv[i][2]);
+    const low = Number(ohlcv[i][3]);
+    const prevClose = Number(ohlcv[i - 1][4]);
+    
+    // True Range = max(high - low, |high - prevClose|, |low - prevClose|)
+    const tr = Math.max(
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
+    );
+    
+    trueRanges.push(tr);
+  }
+  
+  // Calculate ATR as simple moving average of true ranges
+  const recentTR = trueRanges.slice(-period);
+  return average(recentTR);
+}
+
+/**
+ * Extract volume from OHLCV data
+ * @param ohlcv - OHLCV data array
+ * @returns Array of volume values
+ */
+export function extractVolume(ohlcv: OHLCV[]): number[] {
+  return ohlcv.map(candle => Number(candle[5])); // Volume is at index 5
+}

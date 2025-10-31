@@ -377,6 +377,68 @@ export async function getConversationsByModel(modelId: string, limit?: number) {
 
 // ==================== 工具函数 ====================
 
+// ==================== 交易会话相关 ====================
+
+/**
+ * 获取或初始化交易会话启动时间
+ * 如果数据库中没有记录，则使用当前时间作为启动时间并保存
+ * @returns Unix时间戳（秒）
+ */
+export async function getOrInitTradingSessionStartTime(): Promise<number> {
+  const client = await pool.connect();
+  try {
+    // 检查是否已有记录
+    const result = await client.query(
+      'SELECT session_start_time FROM trading_session ORDER BY id LIMIT 1'
+    );
+
+    if (result.rows.length > 0) {
+      // 已有记录，返回已保存的启动时间
+      const startTime = parseInt(result.rows[0].session_start_time);
+      console.log(`[DB] ✓ Using existing trading session start time: ${new Date(startTime * 1000).toISOString()}`);
+      return startTime;
+    }
+
+    // 没有记录，使用当前时间作为启动时间
+    const currentTime = Math.floor(Date.now() / 1000);
+    
+    await client.query(
+      `INSERT INTO trading_session (session_start_time)
+       VALUES ($1)`,
+      [currentTime]
+    );
+
+    console.log(`[DB] ✓ Initialized trading session start time: ${new Date(currentTime * 1000).toISOString()}`);
+    return currentTime;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 重置交易会话启动时间（用于重新开始交易）
+ * @param newStartTime 新的启动时间（Unix时间戳秒），如果不提供则使用当前时间
+ * @returns 新的启动时间
+ */
+export async function resetTradingSessionStartTime(newStartTime?: number): Promise<number> {
+  const client = await pool.connect();
+  try {
+    const startTime = newStartTime || Math.floor(Date.now() / 1000);
+    
+    // 删除所有旧记录并插入新记录
+    await client.query('DELETE FROM trading_session');
+    await client.query(
+      'INSERT INTO trading_session (session_start_time) VALUES ($1)',
+      [startTime]
+    );
+
+    console.log(`[DB] ✓ Reset trading session start time to: ${new Date(startTime * 1000).toISOString()}`);
+    return startTime;
+  } finally {
+    client.release();
+  }
+}
+
 // ==================== BTC Buy&Hold 基准策略相关 ====================
 
 /**

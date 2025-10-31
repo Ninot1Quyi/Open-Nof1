@@ -15,6 +15,8 @@ import { dirname } from 'path';
 import { config as dotenvConfig } from 'dotenv';
 import TradingAgent from './agent.js';
 import { c } from './utils/colors.js';
+import pkg from 'pg';
+const { Pool } = pkg;
 
 // ES模块中定义__dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -26,6 +28,9 @@ const __dirname = dirname(__filename);
 const projectRoot = __dirname.includes('/build/')
   ? path.join(__dirname, '..', '..')
   : path.join(__dirname, '..');
+
+// 数据库连接池（用于读取启动时间）
+let dbPool: typeof Pool.prototype | null = null;
 
 /**
  * Agent 配置接口
@@ -236,15 +241,45 @@ async function startAgent(profile: AgentProfile): Promise<void> {
 
     console.log(c.info(`[${profile.modelId}] Agent 初始化完成`));
 
-    // 计算已交易时长
-    const startTime = new Date('2025-10-28 12:00:00');
+    // 从数据库获取交易会话启动时间
+    let sessionStartTimestamp: number;
+    try {
+      if (!dbPool) {
+        throw new Error('Database pool not initialized');
+      }
+      const client = await dbPool.connect();
+      try {
+        const result = await client.query(
+          'SELECT session_start_time FROM trading_session ORDER BY id LIMIT 1'
+        );
+        
+        if (result.rows.length > 0) {
+          sessionStartTimestamp = parseInt(result.rows[0].session_start_time);
+          console.log(c.success(`[${profile.modelId}] ✓ 使用数据库中的启动时间: ${new Date(sessionStartTimestamp * 1000).toISOString()}`));
+        } else {
+          // 数据库中没有记录，使用当前时间并保存
+          sessionStartTimestamp = Math.floor(Date.now() / 1000);
+          await client.query(
+            'INSERT INTO trading_session (session_start_time) VALUES ($1)',
+            [sessionStartTimestamp]
+          );
+          console.log(c.success(`[${profile.modelId}] ✓ 初始化启动时间: ${new Date(sessionStartTimestamp * 1000).toISOString()}`));
+        }
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      console.error(c.error(`[${profile.modelId}] ✗ 获取启动时间失败，使用默认值:`), error);
+      sessionStartTimestamp = Math.floor(new Date('2025-10-28 12:00:00').getTime() / 1000);
+    }
+
     let invocationCount = 0;
 
     // 定时执行交易决策
     const runTradingCycle = async () => {
       invocationCount++;
-      const now = new Date();
-      const elapsedMinutes = Math.floor((now.getTime() - startTime.getTime()) / 60000);
+      const now = Date.now();
+      const elapsedMinutes = Math.floor((now / 1000 - sessionStartTimestamp) / 60);
 
       try {
         console.log(c.info(`\n[${profile.modelId}] 开始第 ${invocationCount} 次决策...`));
@@ -288,6 +323,24 @@ async function main() {
   } else {
     console.log(c.warn('[Main] ⚠️  未找到全局配置文件 .env'));
     console.log(c.info('[Main]     请复制 .env.example 为 .env 并配置'));
+  }
+
+  // 初始化数据库连接
+  try {
+    dbPool = new Pool({
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT || '5432'),
+      database: process.env.DB_NAME || 'nof1',
+      user: process.env.DB_USER || 'OpenNof1',
+      password: process.env.DB_PASSWORD || '',
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+    });
+    console.log(c.success('[Main] ✓ 数据库连接初始化成功'));
+  } catch (error) {
+    console.error(c.error('[Main] ✗ 数据库连接初始化失败:'), error);
+    console.log(c.warn('[Main] ⚠️  将使用默认启动时间'));
   }
 
   // 获取启用的 Agent 列表

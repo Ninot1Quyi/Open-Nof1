@@ -6,6 +6,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { DataCollector } from './services/DataCollector.js';
 import accountHistoryRouter from './routes/accountHistory.js';
 import accountTotalsRouter from './routes/accountTotals.js';
@@ -13,8 +15,13 @@ import tradesRouter from './routes/trades.js';
 import conversationsRouter from './routes/conversations.js';
 import cryptoPricesRouter from './routes/cryptoPrices.js';
 
-// 加载环境变量
-dotenv.config();
+// ES模块中定义__dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 加载环境变量（从项目根目录）
+const projectRoot = path.resolve(__dirname, '../..');
+dotenv.config({ path: path.join(projectRoot, '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3001;

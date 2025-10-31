@@ -482,21 +482,69 @@ export class DatabaseManager {
   /**
    * Calculate Sharpe Ratio
    * Simplified version: (average return) / (standard deviation of returns)
+   * Uses completed_trades table from backend (synced from exchange)
+   * Only includes trades after the earliest account snapshot (INITIAL_BALANCE reset point)
    */
   async calculateSharpeRatio(): Promise<number> {
-    const closedTrades = await this.getClosedTrades();
-    if (closedTrades.length < 2) return 0;
+    const client = await this.pool.connect();
+    try {
+      // Get the earliest snapshot timestamp (when INITIAL_BALANCE was set)
+      const snapshotResult = await client.query(
+        `SELECT MIN(timestamp) as start_time 
+         FROM account_snapshots 
+         WHERE model_id = $1`,
+        [this.agentName]
+      );
+      
+      const startTime = snapshotResult.rows[0]?.start_time;
+      if (!startTime) {
+        console.log('[DB] No snapshots found, cannot calculate Sharpe Ratio');
+        return 0;
+      }
+      
+      // Get completed trades from backend table after start_time
+      const result = await client.query(
+        `SELECT realized_net_pnl, quantity, entry_price, leverage
+         FROM completed_trades 
+         WHERE model_id = $1 
+         AND exit_time >= $2
+         AND realized_net_pnl IS NOT NULL 
+         AND quantity > 0
+         AND entry_price > 0
+         AND leverage > 0
+         ORDER BY exit_time DESC`,
+        [this.agentName, startTime]
+      );
+      
+      const trades = result.rows;
+      if (trades.length < 2) return 0;
 
-    const returns = closedTrades.map(t => (t.net_pnl || 0) / t.margin);
-    const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
-    
-    const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length;
-    const stdDev = Math.sqrt(variance);
+      // Calculate returns for each trade
+      const returns = trades.map(t => {
+        const netPnl = parseFloat(t.realized_net_pnl);
+        const quantity = parseFloat(t.quantity);
+        const entryPrice = parseFloat(t.entry_price);
+        const leverage = parseFloat(t.leverage);
+        
+        // Calculate margin (position value / leverage)
+        const margin = (quantity * entryPrice) / leverage;
+        
+        // Return = net PnL / margin
+        return netPnl / margin;
+      });
+      
+      const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+      
+      const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length;
+      const stdDev = Math.sqrt(variance);
 
-    if (stdDev === 0) return 0;
-    
-    // Annualized Sharpe (assuming daily returns)
-    return (avgReturn / stdDev) * Math.sqrt(365);
+      if (stdDev === 0) return 0;
+      
+      // Annualized Sharpe (assuming daily returns)
+      return (avgReturn / stdDev) * Math.sqrt(365);
+    } finally {
+      client.release();
+    }
   }
 
   /**

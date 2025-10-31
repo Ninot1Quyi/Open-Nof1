@@ -101,7 +101,7 @@ export class AccountStateTool {
           await this.db.updateTrade(trade.position_id, {
             exit_price: exitPrice,
             exit_time: new Date(),
-            realized_pnl: realizedPnl,
+            net_pnl: realizedPnl,
             status: 'closed',
           });
           

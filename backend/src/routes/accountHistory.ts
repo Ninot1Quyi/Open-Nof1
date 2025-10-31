@@ -10,8 +10,14 @@ const router = Router();
 
 router.get('/account-history', async (req: Request, res: Response) => {
   try {
+    // 获取交易会话启动时间
+    const startTimestamp = await db.getOrInitTradingSessionStartTime();
+    
     // 获取所有账户快照
-    const snapshots = await db.getAllAccountSnapshots();
+    const allSnapshots = await db.getAllAccountSnapshots();
+    
+    // 过滤：只保留启动时间之后的快照
+    const snapshots = allSnapshots.filter((s: any) => parseInt(s.timestamp) >= startTimestamp);
 
     // 转换为前端需要的格式
     const accountTotals = snapshots.map(snapshot => ({
@@ -25,7 +31,8 @@ router.get('/account-history', async (req: Request, res: Response) => {
     res.json({
       accountTotals,
       count: accountTotals.length,
-      initialBalance: parseFloat(process.env.INITIAL_BALANCE || '10000')
+      initialBalance: parseFloat(process.env.INITIAL_BALANCE || '10000'),
+      sessionStartTime: startTimestamp  // 返回会话启动时间
     });
   } catch (error) {
     console.error('[API] Error in /api/account-history:', error);
