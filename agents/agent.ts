@@ -291,8 +291,8 @@ export class TradingAgent {
       }
 
       const signal = tradeArgs.signal;
-      const signalColor = signal === 'buy_to_enter' || signal === 'buy' || signal === 'open_long' ? c.long(signal) : 
-                         signal === 'sell_to_enter' || signal === 'open_short' ? c.short(signal) : 
+      const signalColor = signal === 'buy_to_enter' ? c.long(signal) : 
+                         signal === 'sell_to_enter' ? c.short(signal) : 
                          c.info(signal);
       console.log(`\n${c.divider('-', 40)}`);
       console.log(`${c.title('Processing')} ${c.coin(coin)}: ${signalColor}`);
@@ -301,11 +301,8 @@ export class TradingAgent {
       try {
         let result;
         switch (signal) {
-          case 'buy':
           case 'buy_to_enter':
-          case 'open_long':
           case 'sell_to_enter':
-          case 'open_short':
             // 执行开仓操作（不在这里重试，让AI重新决策）
             result = await this.executeEntry(coin, tradeArgs, signal);
             
@@ -319,8 +316,7 @@ export class TradingAgent {
             });
             break;
 
-          case 'sell':
-          case 'close_position':
+          case 'close':
             result = await this.executeClose(coin, tradeArgs);
             
             // 如果仓位不存在，视为成功（目标已达成）
@@ -447,57 +443,25 @@ export class TradingAgent {
   private async executeEntry(
     coin: string,
     tradeArgs: any,
-    signal: 'buy' | 'buy_to_enter' | 'open_long' | 'sell_to_enter' | 'open_short'
+    signal: 'buy_to_enter' | 'sell_to_enter'
   ): Promise<any> {
     // console.log(`\n${c.divider()}`);
     // console.log(c.title(`[AGENT] Starting executeEntry for ${c.coin(coin)}`));
     // console.log(c.divider());
     
-    // 将所有 action 映射到 MCP 支持的格式
-    let action: string;
-    if (signal === 'buy' || signal === 'buy_to_enter' || signal === 'open_long') {
-      action = signal; // 保持原样，MCP 都支持
-    } else if (signal === 'sell_to_enter' || signal === 'open_short') {
-      action = signal; // 保持原样，MCP 都支持
-    } else {
-      action = signal;
-    }
-    
-    const actionColor = (signal === 'buy' || signal === 'buy_to_enter' || signal === 'open_long') ? c.long(action) : c.short(action);
+    const action = signal;
+    const actionColor = signal === 'buy_to_enter' ? c.long(action) : c.short(action);
     console.log(`${c.info('[AGENT]')} Action: ${actionColor}`);
     
-    // 计算保证金金额（基于风险和止损距离）
+    // 直接使用 AI 决策的参数
     const leverage = tradeArgs.leverage || 10;
-    const riskUsd = tradeArgs.risk_usd || 100;
+    const quantity = tradeArgs.quantity;
     
     console.log(`\n${c.info('[AGENT]')} ${c.title('AI Decision:')}`);
+    console.log(`  - Quantity: ${quantity} ${coin}`);
     console.log(`  - Leverage: ${fmt.leverage(leverage)}`);
-    console.log(`  - Risk USD: ${fmt.usd(riskUsd)}`);
     console.log(`  - Stop Loss: ${c.price(tradeArgs.stop_loss)}`);
     console.log(`  - Profit Target: ${c.price(tradeArgs.profit_target)}`);
-    
-    // 获取当前价格和止损价格
-    const currentPrice = tradeArgs.quantity ? 
-      (tradeArgs.quantity * (tradeArgs.stop_loss + tradeArgs.profit_target) / 2) / tradeArgs.quantity : 
-      (tradeArgs.stop_loss + tradeArgs.profit_target) / 2;
-    
-    const stopLoss = tradeArgs.stop_loss;
-    
-    // 计算止损距离（百分比）
-    const stopDistance = Math.abs(currentPrice - stopLoss) / currentPrice;
-    
-    // 根据风险金额反推仓位大小
-    const positionSize = riskUsd / stopDistance;
-    
-    // 计算需要的保证金
-    const marginAmount = positionSize / leverage;
-    
-    console.log(`\n${c.info('[AGENT]')} ${c.title('Calculated Position Sizing:')}`);
-    console.log(`  - Current Price: ${fmt.usd(currentPrice)}`);
-    console.log(`  - Stop Distance: ${fmt.percent(stopDistance)}`);
-    console.log(`  - Position Size: ${fmt.usd(positionSize)}`);
-    console.log(`  - Required Margin: ${fmt.usd(marginAmount)}`);
-    console.log(`  - Leverage: ${fmt.leverage(leverage)}`);
     
     if (this.config.bypassRiskControl) {
       this.warn('Risk control bypassed - AI has full control');
@@ -506,14 +470,14 @@ export class TradingAgent {
     console.log(`\n${c.info('[AGENT]')} ${c.title('Sending to MCP Client:')}`);
     console.log(`  - action: ${actionColor}`);
     console.log(`  - coin: ${coin}`);
+    console.log(`  - quantity: ${quantity}`);
     console.log(`  - leverage: ${leverage}`);
-    console.log(`  - margin_amount: ${marginAmount}`);
 
     const result = await this.mcpClient.executeTrade({
       action,
       coin,
+      quantity,
       leverage,
-      margin_amount: marginAmount,
       exit_plan: {
         profit_target: tradeArgs.profit_target,
         stop_loss: tradeArgs.stop_loss,
@@ -543,7 +507,7 @@ export class TradingAgent {
 
     // 直接发送平仓请求，MCP 会根据 coin 查找 position_id
     const result = await this.mcpClient.executeTrade({
-      action: 'close_position',
+      action: 'close',
       coin,
       bypass_risk_check: this.config.bypassRiskControl,
     });
@@ -631,7 +595,15 @@ export class TradingAgent {
 
       // 深拷贝 decisions，避免修改原始对象
       const decisionsToSave = JSON.parse(JSON.stringify(aiResponse.decisions || {}));
-      
+      //将其中的buy_to_enter和sell_to_enter字符串替换为buy和sell
+      for (const coin in decisionsToSave) {
+        const decision = decisionsToSave[coin];
+        if (decision?.trade_signal_args?.signal === 'buy_to_enter') {
+          decision.trade_signal_args.signal = 'buy';
+        } else if (decision?.trade_signal_args?.signal === 'sell_to_enter') {
+          decision.trade_signal_args.signal = 'sell';
+        }
+      }
       // 更新 hold 操作的 quantity 为实际仓位数量
       if (accountState?.active_positions) {
         for (const coin in decisionsToSave) {

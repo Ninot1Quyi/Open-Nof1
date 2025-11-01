@@ -239,6 +239,24 @@ export class DataCollector {
         console.log(`[DataCollector] ✓ Saved snapshot for ${modelId}: $${accountState.accountValue.toFixed(2)} (${accountState.positions.length} positions)`);
       } catch (error) {
         console.error(`[DataCollector] Error collecting data for ${modelId}:`, error);
+        
+        // 即使出错，也保存一个快照（使用上一次的数据）
+        try {
+          const allSnapshots = await db.getLatestAccountSnapshots();
+          const lastSnapshot = allSnapshots.find(s => s.model_id === modelId);
+          if (lastSnapshot) {
+            await db.saveAccountSnapshot({
+              model_id: modelId,
+              timestamp,  // 使用当前时间戳
+              dollar_equity: lastSnapshot.dollar_equity,
+              total_unrealized_pnl: lastSnapshot.total_unrealized_pnl,
+              available_cash: lastSnapshot.available_cash,
+            });
+            console.log(`[DataCollector] ⚠ Saved fallback snapshot for ${modelId} with previous data`);
+          }
+        } catch (fallbackError) {
+          console.error(`[DataCollector] Failed to save fallback snapshot for ${modelId}:`, fallbackError);
+        }
       }
     }
 

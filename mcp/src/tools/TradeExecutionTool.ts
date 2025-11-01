@@ -24,6 +24,7 @@ export class TradeExecutionTool {
       action,
       coin,
       leverage = 1,
+      quantity,
       margin_amount = 0,
       position_id,
       exit_plan,
@@ -34,6 +35,7 @@ export class TradeExecutionTool {
     console.log(`[MCP-TOOL] Received parameters:`);
     console.log(`  - action: ${action}`);
     console.log(`  - coin: ${coin}`);
+    console.log(`  - quantity: ${quantity}`);
     console.log(`  - leverage: ${leverage}`);
     console.log(`  - margin_amount: ${margin_amount}`);
     console.log(`  - exit_plan:`, exit_plan);
@@ -55,19 +57,15 @@ export class TradeExecutionTool {
       }
 
       // Execute based on action
-      // 支持新旧两种 action 名称
-      if (action === 'buy' || action === 'buy_to_enter' || action === 'open_long') {
-        // 买入：开多仓或加仓
-        return await this.openPosition('open_long', coin, leverage, margin_amount, exit_plan, confidence);
-      } else if (action === 'sell_to_enter' || action === 'open_short') {
-        // 卖出开仓：开空仓
-        return await this.openPosition('open_short', coin, leverage, margin_amount, exit_plan, confidence);
-      } else if (action === 'sell' || action === 'close_position') {
+      if (action === 'buy_to_enter') {
+        // 开多仓
+        return await this.openPosition('open_long', coin, leverage, quantity, margin_amount, exit_plan, confidence);
+      } else if (action === 'sell_to_enter') {
+        // 开空仓
+        return await this.openPosition('open_short', coin, leverage, quantity, margin_amount, exit_plan, confidence);
+      } else if (action === 'close') {
         // 平仓
         return await this.closePosition(coin);
-      } else if (action === 'reduce_position') {
-        // 减仓
-        return await this.reducePosition(coin, params.quantity, exit_plan);
       } else if (action === 'hold') {
         // 持有：不执行任何操作
         return {
@@ -95,6 +93,7 @@ export class TradeExecutionTool {
     action: 'open_long' | 'open_short',
     coin: string,
     leverage: number,
+    quantity: number | undefined,
     marginAmount: number,
     exitPlan: any,
     confidence?: number
@@ -102,6 +101,7 @@ export class TradeExecutionTool {
     console.log(`\n[MCP-TOOL] openPosition() called:`);
     console.log(`  - action: ${action}`);
     console.log(`  - coin: ${coin}`);
+    console.log(`  - quantity: ${quantity}`);
     console.log(`  - leverage: ${leverage}`);
     console.log(`  - marginAmount: ${marginAmount}`);
     
@@ -150,27 +150,40 @@ export class TradeExecutionTool {
     }
     // ========================================
 
-    // Get current price to calculate quantity
+    // 获取当前价格
     const currentPrice = await this.exchange.getPrice(coin);
     console.log(`[MCP-TOOL] Current ${coin} price: $${currentPrice}`);
     
-    const totalNotionalValue = marginAmount * leverage;
-    const totalQuantity = totalNotionalValue / currentPrice;
+    // 使用 AI 决策的 quantity，如果没有则用 marginAmount 计算
+    let totalQuantity: number;
+    let calculatedMargin: number;
     
-    console.log(`[MCP-TOOL] Position calculation:`);
-    console.log(`  - Margin: $${marginAmount}`);
-    console.log(`  - Leverage: ${leverage}x`);
-    console.log(`  - Notional Value: $${totalNotionalValue}`);
-    console.log(`  - Quantity: ${totalQuantity} ${coin}`);
+    if (quantity && quantity > 0) {
+      // 直接使用 AI 决策的数量
+      totalQuantity = quantity;
+      const totalNotionalValue = totalQuantity * currentPrice;
+      calculatedMargin = totalNotionalValue / leverage;
+      console.log(`[MCP-TOOL] Using AI-specified quantity:`);
+      console.log(`  - Quantity: ${totalQuantity} ${coin}`);
+      console.log(`  - Notional Value: $${totalNotionalValue}`);
+      console.log(`  - Required Margin: $${calculatedMargin}`);
+      console.log(`  - Leverage: ${leverage}x`);
+    } else {
+      // 回退到使用 marginAmount 计算
+      const totalNotionalValue = marginAmount * leverage;
+      totalQuantity = totalNotionalValue / currentPrice;
+      calculatedMargin = marginAmount;
+      console.log(`[MCP-TOOL] Calculating from margin:`);
+      console.log(`  - Margin: $${marginAmount}`);
+      console.log(`  - Leverage: ${leverage}x`);
+      console.log(`  - Notional Value: $${totalNotionalValue}`);
+      console.log(`  - Quantity: ${totalQuantity} ${coin}`);
+    }
     
-    // 尝试执行订单，如果太大则自动拆分
-    const order = await this.executeOrderWithSplit(
-      side,
-      coin,
-      totalQuantity,
-      leverage,
-      marginAmount
-    );
+    // 直接执行订单，不拆分
+    const order = side === 'long'
+      ? await this.exchange.openLong(coin, totalQuantity, leverage, calculatedMargin)
+      : await this.exchange.openShort(coin, totalQuantity, leverage, calculatedMargin);
 
     // Calculate liquidation price (simplified)
     const liquidationPrice = side === 'long'
@@ -257,94 +270,20 @@ export class TradeExecutionTool {
       ? `${baseMessage}. WARNING: ${slTpWarning}. Current price: $${currentPrice}`
       : baseMessage;
 
+    const notionalValue = totalQuantity * currentPrice;
+    
     return {
       success: true,
       position_id: positionId,
       entry_price: currentPrice,
       quantity: totalQuantity,
-      notional_value: totalNotionalValue,
+      notional_value: notionalValue,
       liquidation_price: liquidationPrice,
       message: finalMessage,
       warning: slTpWarning, // 添加警告字段
     };
   }
 
-  /**
-   * 执行订单，如果订单太大则自动拆分
-   * 使用二分法递归拆分直到满足交易所限制
-   */
-  private async executeOrderWithSplit(
-    side: 'long' | 'short',
-    coin: string,
-    quantity: number,
-    leverage: number,
-    marginAmount: number,
-    splitCount: number = 1
-  ): Promise<any> {
-    const maxSplits = 4; // 最多拆分4次（最多16个订单）
-    
-    try {
-      console.log(`[ORDER-SPLIT] Attempting to execute order (split ${splitCount}):`);
-      console.log(`  - Quantity: ${quantity}`);
-      console.log(`  - Margin per order: $${marginAmount}`);
-      
-      // 尝试执行订单
-      const order = side === 'long'
-        ? await this.exchange.openLong(coin, quantity, leverage, marginAmount)
-        : await this.exchange.openShort(coin, quantity, leverage, marginAmount);
-      
-      console.log(`[ORDER-SPLIT] Order executed successfully!`);
-      return order;
-      
-    } catch (error: any) {
-      // 检查是否是"订单金额太大"的错误
-      const errorMsg = error.message || String(error);
-      const isAmountTooLarge = errorMsg.includes('51202') || 
-                               errorMsg.includes('exceeds the maximum amount') ||
-                               errorMsg.includes('Market order amount exceeds');
-      
-      if (isAmountTooLarge && splitCount < maxSplits) {
-        console.log(`[ORDER-SPLIT] Order too large, splitting into 2 smaller orders...`);
-        
-        // 二分拆分
-        const halfQuantity = quantity / 2;
-        const halfMargin = marginAmount / 2;
-        
-        console.log(`[ORDER-SPLIT] Split ${splitCount}: ${quantity} → 2 × ${halfQuantity}`);
-        
-        // 递归执行两个小订单
-        const order1 = await this.executeOrderWithSplit(
-          side, coin, halfQuantity, leverage, halfMargin, splitCount + 1
-        );
-        
-        const order2 = await this.executeOrderWithSplit(
-          side, coin, halfQuantity, leverage, halfMargin, splitCount + 1
-        );
-        
-        console.log(`[ORDER-SPLIT] Both split orders executed successfully!`);
-        
-        // 合并两个订单的结果
-        return {
-          ...order1,
-          quantity: (order1.amount || 0) + (order2.amount || 0),
-          fee: {
-            cost: (order1.fee?.cost || 0) + (order2.fee?.cost || 0),
-          },
-          info: {
-            split: true,
-            splitCount: splitCount,
-            orders: [order1, order2],
-          },
-        };
-      } else {
-        // 不是金额太大的错误，或者已经拆分太多次了
-        if (splitCount >= maxSplits) {
-          console.error(`[ORDER-SPLIT] Max splits (${maxSplits}) reached, giving up`);
-        }
-        throw error;
-      }
-    }
-  }
 
   /**
    * 减仓（部分平仓）
@@ -573,7 +512,7 @@ export class TradeExecutionTool {
     const errors: string[] = [];
 
     // Check if exit plan is provided for new positions
-    if (params.action === 'buy' && !params.exit_plan) {
+    if ((params.action === 'buy_to_enter' || params.action === 'sell_to_enter') && !params.exit_plan) {
       errors.push('Exit plan is required for opening positions');
     }
 
@@ -588,7 +527,7 @@ export class TradeExecutionTool {
     }
 
     // Get account state for risk checks
-    if (params.action === 'buy' && params.margin_amount) {
+    if ((params.action === 'buy_to_enter' || params.action === 'sell_to_enter') && params.margin_amount) {
       const balance = await this.exchange.getBalance();
       const availableCash = balance.USDT?.free || 0;
 

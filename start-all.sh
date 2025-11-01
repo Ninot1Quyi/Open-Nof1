@@ -241,6 +241,23 @@ done
 
 # 4. 启动 Trading Agents（后台运行，使用 tsx）
 echo "[4/4] 启动 Trading Agents..."
+
+# 等待 MCP 服务器完全就绪
+echo -n "等待 MCP 服务器就绪"
+for i in {1..10}; do
+    sleep 1
+    echo -n "."
+    # 检查 MCP 日志中是否有 "MCP Server running" 或类似的就绪标志
+    if grep -q "MCP Server running\|Server started" "$PROJECT_ROOT/logs/mcp.log" 2>/dev/null; then
+        echo -e " ${GREEN}✓${NC}"
+        break
+    fi
+    if [ $i -eq 10 ]; then
+        echo -e " ${YELLOW}⚠${NC}"
+        echo -e "${YELLOW}警告: MCP 服务器可能还未完全就绪${NC}"
+    fi
+done
+
 cd "$PROJECT_ROOT/agents"
 nohup tsx main.ts > "$PROJECT_ROOT/logs/agents.log" 2>&1 &
 AGENTS_PID=$!

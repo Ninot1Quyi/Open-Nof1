@@ -225,7 +225,11 @@ export class DatabaseManager {
 
       if (updates.exit_time !== undefined) {
         setClauses.push(`exit_time = $${paramIndex++}`);
-        values.push(updates.exit_time);
+        // 将 Date 对象转换为 Unix 时间戳（秒）
+        const exitTimeValue = updates.exit_time instanceof Date 
+          ? Math.floor(updates.exit_time.getTime() / 1000)
+          : updates.exit_time;
+        values.push(exitTimeValue);
       }
       if (updates.exit_price !== undefined) {
         setClauses.push(`exit_price = $${paramIndex++}`);
@@ -481,11 +485,11 @@ export class DatabaseManager {
 
   /**
    * Calculate Sharpe Ratio
-   * Simplified version: (average return) / (standard deviation of returns)
    * Uses completed_trades table from backend (synced from exchange)
    * Only includes trades after the earliest account snapshot (INITIAL_BALANCE reset point)
+   * Includes unrealized P&L from current open positions for real-time calculation
    */
-  async calculateSharpeRatio(): Promise<number> {
+  async calculateSharpeRatio(openPositions?: any[]): Promise<number> {
     const client = await this.pool.connect();
     try {
       // Get the earliest snapshot timestamp (when INITIAL_BALANCE was set)
@@ -517,9 +521,8 @@ export class DatabaseManager {
       );
       
       const trades = result.rows;
-      if (trades.length < 2) return 0;
 
-      // Calculate returns for each trade
+      // Calculate returns for each completed trade
       const returns = trades.map(t => {
         const netPnl = parseFloat(t.realized_net_pnl);
         const quantity = parseFloat(t.quantity);
@@ -532,6 +535,25 @@ export class DatabaseManager {
         // Return = net PnL / margin
         return netPnl / margin;
       });
+
+      // Add unrealized returns from open positions
+      if (openPositions && openPositions.length > 0) {
+        for (const pos of openPositions) {
+          const unrealizedPnl = pos.unrealized_pnl || pos.unrealizedPnl || 0;
+          const quantity = pos.quantity || 0;
+          const entryPrice = pos.entry_price || pos.entryPrice || 0;
+          const leverage = pos.leverage || 1;
+          
+          if (quantity > 0 && entryPrice > 0) {
+            const margin = (quantity * entryPrice) / leverage;
+            const unrealizedReturn = unrealizedPnl / margin;
+            returns.push(unrealizedReturn);
+          }
+        }
+      }
+      
+      // Need at least 2 data points to calculate std dev
+      if (returns.length < 2) return 0;
       
       const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
       

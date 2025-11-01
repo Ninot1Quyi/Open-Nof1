@@ -9,6 +9,16 @@ import { ExchangeConfig, Position } from '../types.js';
 export class ExchangeAdapter {
   private exchange: Exchange;
   private config: ExchangeConfig;
+  
+  // OKX 永续合约规格：1 张合约代表多少币
+  private readonly CONTRACT_SIZES: { [key: string]: number } = {
+    'BTC': 0.01,
+    'ETH': 0.1,
+    'SOL': 1,
+    'BNB': 0.1,
+    'DOGE': 100,
+    'XRP': 10,
+  };
 
   constructor(config: ExchangeConfig) {
     this.config = config;
@@ -21,8 +31,10 @@ export class ExchangeAdapter {
       secret: config.apiSecret,
       password: config.password,
       enableRateLimit: true,
+      timeout: 30000, // 增加超时时间到 30 秒
       options: {
         defaultType: 'swap', // Perpetual contracts
+        recvWindow: 60000, // OKX 特定：接收窗口时间
       },
     });
 
@@ -30,6 +42,16 @@ export class ExchangeAdapter {
     if (config.useSandbox) {
       this.exchange.setSandboxMode(true);
     }
+  }
+  
+  /**
+   * 将币数量转换为合约张数
+   */
+  private convertToContracts(symbol: string, quantity: number): number {
+    const contractSize = this.CONTRACT_SIZES[symbol] || 1;
+    const contracts = quantity / contractSize;
+    console.log(`[EXCHANGE] Converting ${quantity} ${symbol} to ${contracts} contracts (1 contract = ${contractSize} ${symbol})`);
+    return contracts;
   }
 
   /**
@@ -226,12 +248,16 @@ export class ExchangeAdapter {
         quantity = calculatedQuantity;
       }
       
+      // 将币数量转换为合约张数
+      const contracts = this.convertToContracts(symbol, quantity);
+      
       console.log(`[EXCHANGE] Step 2: Creating market buy order...`);
       console.log(`  - Symbol: ${formattedSymbol}`);
-      console.log(`  - Quantity: ${quantity}`);
+      console.log(`  - Quantity (coins): ${quantity}`);
+      console.log(`  - Quantity (contracts): ${contracts}`);
       console.log(`  - Params:`, params);
       
-      const order = await this.exchange.createMarketBuyOrder(formattedSymbol, quantity, params);
+      const order = await this.exchange.createMarketBuyOrder(formattedSymbol, contracts, params);
       
       console.log(`[EXCHANGE] Order created successfully:`);
       console.log(`  - Order ID: ${order.id}`);
@@ -279,7 +305,16 @@ export class ExchangeAdapter {
         quantity = calculatedQuantity;
       }
       
-      const order = await this.exchange.createMarketSellOrder(formattedSymbol, quantity, params);
+      // 将币数量转换为合约张数
+      const contracts = this.convertToContracts(symbol, quantity);
+      
+      console.log(`[EXCHANGE] Creating market sell order...`);
+      console.log(`  - Symbol: ${formattedSymbol}`);
+      console.log(`  - Quantity (coins): ${quantity}`);
+      console.log(`  - Quantity (contracts): ${contracts}`);
+      console.log(`  - Params:`, params);
+      
+      const order = await this.exchange.createMarketSellOrder(formattedSymbol, contracts, params);
       return order;
     } catch (error) {
       console.error(`Error opening short position for ${symbol}:`, error);
@@ -394,6 +429,9 @@ export class ExchangeAdapter {
     try {
       const formattedSymbol = this.formatSymbol(symbol);
       
+      // 将币数量转换为合约张数
+      const contracts = this.convertToContracts(symbol, quantity);
+      
       // 止损单：多头用止损卖出，空头用止损买入
       const orderSide = side === 'long' ? 'sell' : 'buy';
       
@@ -404,11 +442,13 @@ export class ExchangeAdapter {
         reduceOnly: true,
       };
       
+      console.log(`[EXCHANGE] Setting stop loss: ${quantity} ${symbol} = ${contracts} contracts at $${stopPrice}`);
+      
       const order = await this.exchange.createOrder(
         formattedSymbol,
         'market',
         orderSide,
-        quantity,
+        contracts,
         undefined,
         params
       );
@@ -433,6 +473,9 @@ export class ExchangeAdapter {
     try {
       const formattedSymbol = this.formatSymbol(symbol);
       
+      // 将币数量转换为合约张数
+      const contracts = this.convertToContracts(symbol, quantity);
+      
       // 止盈单：多头用限价卖出，空头用限价买入
       const orderSide = side === 'long' ? 'sell' : 'buy';
       
@@ -443,11 +486,13 @@ export class ExchangeAdapter {
         reduceOnly: true,
       };
       
+      console.log(`[EXCHANGE] Setting take profit: ${quantity} ${symbol} = ${contracts} contracts at $${profitPrice}`);
+      
       const order = await this.exchange.createOrder(
         formattedSymbol,
         'market',
         orderSide,
-        quantity,
+        contracts,
         undefined,
         params
       );

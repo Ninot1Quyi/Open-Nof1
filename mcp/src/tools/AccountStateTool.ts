@@ -241,7 +241,8 @@ export class AccountStateTool {
 
     if (include_performance) {
       try {
-        sharpeRatio = await this.db.calculateSharpeRatio();
+        // 传入当前持仓信息，计算包含未实现盈亏的实时夏普率
+        sharpeRatio = await this.db.calculateSharpeRatio(positions);
         winRate = await this.db.calculateWinRate();
         tradeCount = allTrades.length;
       } catch (error) {

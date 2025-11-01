@@ -88,7 +88,7 @@ export interface AccountStateResponse {
 // ============= Trade Execution Types =============
 
 export interface TradeParams {
-  action: 'buy' | 'sell' | 'hold' | 'buy_to_enter' | 'sell_to_enter' | 'open_long' | 'open_short' | 'close_position' | 'reduce_position';
+  action: 'buy_to_enter' | 'sell_to_enter' | 'close' | 'hold';
   coin: string;
   leverage?: number;
   margin_amount?: number;
